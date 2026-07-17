@@ -1,0 +1,342 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-2: var(--brand-2);
+  --color-brand-3: var(--brand-3);
+  --color-surface: var(--surface);
+  --color-surface-soft: var(--surface-soft);
+  --color-dark-blue: var(--dark-blue);
+  --color-dark-blue-2: var(--dark-blue-2);
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --radius: 0.875rem;
+
+  /* Light SaaS/Bitrix-style base */
+  --background: oklch(0.985 0.012 240);     /* #F6FAFF */
+  --foreground: oklch(0.2 0.05 260);        /* #071A3F */
+  --card: oklch(1 0 0);                     /* #FFFFFF */
+  --card-foreground: oklch(0.2 0.05 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.05 260);
+  --primary: oklch(0.6 0.21 258);           /* #006DFF */
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.96 0.02 240);
+  --secondary-foreground: oklch(0.2 0.05 260);
+  --muted: oklch(0.96 0.02 240);
+  --muted-foreground: oklch(0.5 0.05 255);  /* #4B638A */
+  --accent: oklch(0.94 0.04 235);
+  --accent-foreground: oklch(0.2 0.05 260);
+  --destructive: oklch(0.65 0.22 22);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.91 0.035 240);          /* #D9E8FF */
+  --input: oklch(0.93 0.025 240);
+  --ring: oklch(0.6 0.21 258);
+
+  --brand: oklch(0.6 0.21 258);             /* #006DFF */
+  --brand-2: oklch(0.74 0.16 230);          /* #00B7FF */
+  --brand-3: oklch(0.65 0.22 295);          /* #8B5CF6 violet accent */
+  --surface: oklch(1 0 0);                  /* #FFFFFF */
+  --surface-soft: oklch(0.97 0.018 240);    /* #EEF6FF */
+  --dark-blue: oklch(0.22 0.07 258);        /* #061A3D */
+  --dark-blue-2: oklch(0.28 0.085 258);     /* #082A5A */
+
+  --gradient-brand: linear-gradient(135deg, #006DFF 0%, #1677FF 52%, #8B5CF6 100%);
+  --gradient-text: linear-gradient(90deg, #006DFF 0%, #00B7FF 48%, #8B5CF6 100%);
+  --gradient-hero:
+    radial-gradient(circle at 85% 45%, rgba(0,109,255,0.18), transparent 36%),
+    radial-gradient(circle at 15% 35%, rgba(43,203,255,0.16), transparent 32%),
+    linear-gradient(135deg, #F8FBFF 0%, #EEF7FF 42%, #E7F4FF 100%);
+  --shadow-glow: 0 20px 60px -20px rgba(0, 109, 255, 0.45);
+  --shadow-card: 0 10px 30px -12px rgba(7, 26, 63, 0.12);
+}
+
+/* Dark scope: rebinds tokens so child components using foreground/muted/border/card classes render correctly on dark-blue sections (Integrations, BitrixGPT, Footer). */
+.dark-scope {
+  --background: var(--dark-blue);
+  --foreground: oklch(0.99 0.005 240);
+  --card: oklch(0.28 0.085 258);
+  --card-foreground: oklch(0.99 0.005 240);
+  --popover: oklch(0.28 0.085 258);
+  --popover-foreground: oklch(0.99 0.005 240);
+  --muted-foreground: oklch(0.78 0.04 235);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 14%);
+  --secondary: oklch(0.28 0.085 258);
+  --accent: oklch(0.32 0.09 258);
+  background-color: var(--dark-blue);
+  color: var(--foreground);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html, body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+}
+
+@utility text-gradient {
+  background: var(--gradient-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility bg-gradient-brand {
+  background: var(--gradient-brand);
+}
+
+@utility bg-hero {
+  background: var(--gradient-hero);
+}
+
+@utility glass {
+  background: color-mix(in oklab, var(--card) 85%, transparent);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-card);
+}
+
+.dark-scope .glass {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+@utility glow {
+  box-shadow: var(--shadow-glow);
+}
+
+@utility card-soft {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   V3 ADDITIONS — Scroll-Reveal, Animated Counters, Timeline
+────────────────────────────────────────────────────────────────*/
+
+/* Scroll-reveal: hidden state */
+.reveal-hidden {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 500ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 500ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Scroll-reveal: visible state (class added by IntersectionObserver) */
+.reveal-visible {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 500ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 500ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Dashboard bar fill animation triggered by IntersectionObserver via data-attr */
+@keyframes bar-fill {
+  from { width: 0%; }
+  to   { width: var(--bar-width, 100%); }
+}
+
+.animate-bar-fill {
+  animation: bar-fill 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Staggered bar delays for funnel */
+.animate-bar-fill:nth-child(1) { animation-delay: 0ms;   }
+.animate-bar-fill:nth-child(2) { animation-delay: 120ms; }
+.animate-bar-fill:nth-child(3) { animation-delay: 240ms; }
+.animate-bar-fill:nth-child(4) { animation-delay: 360ms; }
+
+/* Chart bar grow animation (bar chart) */
+@keyframes bar-grow {
+  from { transform: scaleY(0); transform-origin: bottom; }
+  to   { transform: scaleY(1); transform-origin: bottom; }
+}
+
+.animate-bar-grow {
+  animation: bar-grow 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Process timeline connector — horizontal */
+.timeline-connector-h {
+  position: absolute;
+  top: 28px; /* centre of the step circle (size-14 / 2) */
+  left: calc(50% + 28px);
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(0,109,255,0.5), rgba(0,183,255,0.3));
+  z-index: 0;
+}
+
+/* Process timeline connector — vertical (mobile) */
+.timeline-connector-v {
+  position: absolute;
+  left: 28px; /* centre of step circle */
+  top: 56px;  /* bottom of circle */
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(0,109,255,0.5), rgba(0,183,255,0.2));
+  z-index: 0;
+}
+
+/* Card hover lift — reusable utility */
+@utility card-hover {
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 55px rgba(0, 75, 160, 0.14);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   AI-CHIP 3D SCENE — orbit rings, float, glow, particles
+────────────────────────────────────────────────────────────────*/
+
+@keyframes chip-float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-14px); }
+}
+
+@keyframes orbit-cw {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes orbit-ccw {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(-360deg); }
+}
+
+@keyframes glow-pulse-ai {
+  0%, 100% { opacity: 0.45; transform: scale(1); }
+  50%       { opacity: 0.85; transform: scale(1.18); }
+}
+
+@keyframes particle-drift {
+  0%, 100% { transform: translate(0, 0) scale(1);     opacity: 0.65; }
+  33%       { transform: translate(8px, -14px) scale(1.3); opacity: 1;    }
+  66%       { transform: translate(-7px, 9px) scale(0.75); opacity: 0.45; }
+}
+
+@keyframes chip-glow {
+  0%, 100% { filter: drop-shadow(0 0 18px rgba(0,183,255,0.55)) drop-shadow(0 0 40px rgba(0,109,255,0.30)); }
+  50%       { filter: drop-shadow(0 0 38px rgba(0,183,255,0.90)) drop-shadow(0 0 70px rgba(0,109,255,0.55)); }
+}
+
+.animate-chip-float   { animation: chip-float    4s ease-in-out infinite; }
+.animate-chip-glow    { animation: chip-glow     2.8s ease-in-out infinite; }
+.animate-orbit-cw-14  { animation: orbit-cw      14s linear infinite; }
+.animate-orbit-cw-20  { animation: orbit-cw      20s linear infinite; }
+.animate-orbit-ccw-30 { animation: orbit-ccw     30s linear infinite; }
+.animate-glow-pulse-ai { animation: glow-pulse-ai 3s ease-in-out infinite; }
+.animate-particle-drift { animation: particle-drift 5s ease-in-out infinite; }
+
+/* ──────────────────────────────────────────────────────────────
+   HERO 3D — floating glass chips + dashboard perspective tilt
+────────────────────────────────────────────────────────────────*/
+
+@keyframes float {
+  from { transform: translateY(0px) rotate(-1.2deg); }
+  to   { transform: translateY(-14px) rotate(1.2deg); }
+}
+
+.dashboard-3d {
+  transform: perspective(1200px) rotateY(-8deg) rotateX(3deg) translateZ(0);
+  transform-style: preserve-3d;
+  transition:
+    transform 500ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 500ms ease;
+  box-shadow:
+    0 32px 80px rgba(0, 75, 160, 0.22),
+    0 8px 24px rgba(0, 109, 255, 0.14),
+    12px 20px 40px rgba(0, 0, 0, 0.10);
+}
+
+/* Depth pseudo-shadow layer beneath dashboard */
+.dashboard-3d::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transform: translateZ(-40px) scale(0.9);
+  background: radial-gradient(ellipse at 50% 100%, rgba(0,109,255,0.18) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.dashboard-3d:hover {
+  transform: perspective(1200px) rotateY(0deg) rotateX(0deg) translateZ(0);
+  box-shadow:
+    0 20px 50px rgba(0, 75, 160, 0.14),
+    0 4px 16px rgba(0, 109, 255, 0.10);
+}
+
+@media (max-width: 1023px) {
+  .dashboard-3d {
+    transform: none;
+    box-shadow: 0 16px 48px rgba(0, 75, 160, 0.14);
+  }
+  .dashboard-3d:hover {
+    transform: none;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   PROCESS — animated flowing gradient progress line
+────────────────────────────────────────────────────────────────*/
+
+@keyframes progress-flow {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.animate-progress-line {
+  background-size: 200% 100%;
+  animation: progress-flow 3.5s linear infinite;
+}
