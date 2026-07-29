@@ -1,0 +1,24 @@
+# arwox-forms-gw — forms.arwox.ru → arwox-lead-form (все методы/пути в одну функцию).
+# ПДн-контур: браузер → forms.arwox.ru (YC RU) → функция (YC RU). Немецкий сервер не участвует.
+openapi: 3.0.0
+info:
+  title: arwox-forms
+  version: 1.0.0
+paths:
+  /:
+    x-yc-apigateway-any-method:
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: d4eb92qbfgt3ac0udlmm
+        service_account_id: ajesk8iqatt8pn0ahtuk
+  /{proxy+}:
+    x-yc-apigateway-any-method:
+      parameters:
+        - name: proxy
+          in: path
+          required: true
+          schema: {type: string}
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: d4eb92qbfgt3ac0udlmm
+        service_account_id: ajesk8iqatt8pn0ahtuk
