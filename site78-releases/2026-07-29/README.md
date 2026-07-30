@@ -13,15 +13,17 @@
 
 ## Откат на эту версию
 ```bash
+cd "$(git rev-parse --show-toplevel)/site78-releases/2026-07-29"
 python3 - <<'EOF'
-import json
-h = open('block9116-content.html').read()
+import json, pathlib
+BASE = pathlib.Path.cwd()  # equals dir set by cd above; valid in python3 - <<'EOF' heredoc (no __file__)
+h = open(BASE / 'block9116-content.html').read()
 w = '<div id="b9116" class="block-wrapper block-26-2-separator">'
 n = 0
 while h.startswith(w): h = h[len(w):]; n += 1
 if n: h = h[:-6*n]
 json.dump({'lid':362,'block':9116,'content':h}, open('/tmp/restore-block.json','w'), ensure_ascii=False)
-json.dump({'lid':362,'fields':{'ADDITIONAL_FIELDS':{'CSSBLOCK_CODE':open('cssblock-lid362.css').read()}}},
+json.dump({'lid':362,'fields':{'ADDITIONAL_FIELDS':{'CSSBLOCK_CODE':open(BASE / 'cssblock-lid362.css').read()}}},
           open('/tmp/restore-css.json','w'), ensure_ascii=False)
 EOF
 b24 landing.block.updatecontent --json-file /tmp/restore-block.json
