@@ -31,3 +31,29 @@ dist-ssr
 *.sln
 *.sw?
 .env.openai
+
+# === standard-hygiene (auto) ===
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env/
+node_modules/
+*.log
+*.sqlite
+*.db
+data/
+.pytest-tmp/
+.pytest_cache/
+.DS_Store
+*.tmp
+.env
+secrets/
+dist/
+build/
+hh-wt-*/
+.worktrees/
+scratchpad/
+tmp/
+# === end standard-hygiene ===
