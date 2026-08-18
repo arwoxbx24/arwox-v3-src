@@ -1,0 +1,2223 @@
+{
+  "version": "1.0.0",
+  "schema_version": 1,
+  "project": {
+    "name": "arwox-v3-src",
+    "is_monorepo": false,
+    "total_files": 54,
+    "entry_points": [
+      "src/main.tsx",
+      "src/App.tsx"
+    ],
+    "tech_stack": [
+      {
+        "name": "React",
+        "version": "19.2.0",
+        "category": "framework"
+      },
+      {
+        "name": "Tailwind CSS",
+        "version": "4.2.1",
+        "category": "framework"
+      },
+      {
+        "name": "Vite",
+        "version": "7.1.11",
+        "category": "infra"
+      },
+      {
+        "name": "Node.js",
+        "version": null,
+        "category": "language"
+      },
+      {
+        "name": "TypeScript",
+        "version": "5.8.3",
+        "category": "language"
+      }
+    ],
+    "entry_candidates": [
+      "src/main.tsx",
+      "src/App.tsx"
+    ],
+    "graph_mode": "flow"
+  },
+  "nodes": [
+    {
+      "id": "file:CLAUDE.md",
+      "type": "document",
+      "filePath": "CLAUDE.md",
+      "language": "markdown",
+      "symbolCount": 0,
+      "lineCount": 12,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 9,
+      "tags": [],
+      "summary": "Repository instructions and context for AI coding agents."
+    },
+    {
+      "id": "file:components.json",
+      "type": "config",
+      "filePath": "components.json",
+      "language": "json",
+      "symbolCount": 0,
+      "lineCount": 11,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 10,
+      "tags": [
+        "config",
+        "low_signal_summary"
+      ],
+      "summary": "Configuration file: components.json."
+    },
+    {
+      "id": "file:docs/HANDOFF.md",
+      "type": "document",
+      "filePath": "docs/HANDOFF.md",
+      "language": "markdown",
+      "symbolCount": 0,
+      "lineCount": 427,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 11,
+      "tags": [
+        "low_signal_summary"
+      ],
+      "summary": "Documentation: HANDOFF.md."
+    },
+    {
+      "id": "file:docs/landing_text_content.md",
+      "type": "document",
+      "filePath": "docs/landing_text_content.md",
+      "language": "markdown",
+      "symbolCount": 0,
+      "lineCount": 472,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 12,
+      "tags": [
+        "low_signal_summary"
+      ],
+      "summary": "Documentation: landing_text_content.md."
+    },
+    {
+      "id": "file:docs/technical_prompt_colors_gradients.md",
+      "type": "document",
+      "filePath": "docs/technical_prompt_colors_gradients.md",
+      "language": "markdown",
+      "symbolCount": 0,
+      "lineCount": 136,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 13,
+      "tags": [
+        "low_signal_summary"
+      ],
+      "summary": "Documentation: technical_prompt_colors_gradients.md."
+    },
+    {
+      "id": "file:docs/v2-text-reference.tsx",
+      "type": "file",
+      "filePath": "docs/v2-text-reference.tsx",
+      "language": "typescript",
+      "symbolCount": 18,
+      "lineCount": 1411,
+      "complexity": "complex",
+      "pagerank": 0.00724,
+      "communityId": 3,
+      "tags": [],
+      "summary": "Docs & Tooling module v2-text-reference defining Pill, Logo, Header.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:docs/v3-design-spec.md",
+      "type": "document",
+      "filePath": "docs/v3-design-spec.md",
+      "language": "markdown",
+      "symbolCount": 0,
+      "lineCount": 866,
+      "complexity": "complex",
+      "pagerank": 0.00724,
+      "communityId": 14,
+      "tags": [
+        "low_signal_summary"
+      ],
+      "summary": "Documentation: v3-design-spec.md."
+    },
+    {
+      "id": "file:docs/v3-improvements.md",
+      "type": "document",
+      "filePath": "docs/v3-improvements.md",
+      "language": "markdown",
+      "symbolCount": 0,
+      "lineCount": 403,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 15,
+      "tags": [
+        "low_signal_summary"
+      ],
+      "summary": "Documentation: v3-improvements.md."
+    },
+    {
+      "id": "file:eslint.config.js",
+      "type": "file",
+      "filePath": "eslint.config.js",
+      "language": "javascript",
+      "symbolCount": 0,
+      "lineCount": 31,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 4,
+      "tags": [],
+      "summary": "Application module eslint.config.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:index.html",
+      "type": "file",
+      "filePath": "index.html",
+      "language": "html",
+      "symbolCount": 0,
+      "lineCount": 49,
+      "complexity": "simple",
+      "pagerank": 0.013393,
+      "communityId": 7,
+      "tags": [
+        "barrel"
+      ],
+      "summary": "Re-export barrel for root/."
+    },
+    {
+      "id": "file:package.json",
+      "type": "config",
+      "filePath": "package.json",
+      "language": "json",
+      "symbolCount": 0,
+      "lineCount": 21,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 16,
+      "tags": [
+        "config"
+      ],
+      "summary": "Node package manifest: dependencies, scripts, and metadata."
+    },
+    {
+      "id": "file:public/privacy.html",
+      "type": "file",
+      "filePath": "public/privacy.html",
+      "language": "html",
+      "symbolCount": 0,
+      "lineCount": 295,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 17,
+      "tags": [],
+      "summary": "Application module privacy."
+    },
+    {
+      "id": "file:site78-releases/2026-07-29/README.md",
+      "type": "document",
+      "filePath": "site78-releases/2026-07-29/README.md",
+      "language": "markdown",
+      "symbolCount": 0,
+      "lineCount": 53,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 18,
+      "tags": [],
+      "summary": "Project overview and entry point for new readers."
+    },
+    {
+      "id": "file:site78-releases/2026-07-29/additional-fields-lid362.json",
+      "type": "config",
+      "filePath": "site78-releases/2026-07-29/additional-fields-lid362.json",
+      "language": "json",
+      "symbolCount": 0,
+      "lineCount": 1712,
+      "complexity": "complex",
+      "pagerank": 0.00724,
+      "communityId": 19,
+      "tags": [
+        "config",
+        "low_signal_summary"
+      ],
+      "summary": "Configuration file: additional-fields-lid362.json."
+    },
+    {
+      "id": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "type": "file",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "language": "python",
+      "symbolCount": 16,
+      "lineCount": 290,
+      "complexity": "complex",
+      "pagerank": 0.013393,
+      "communityId": 8,
+      "tags": [],
+      "summary": "Application module consent defining sha256_hex, build_receipt, _hmac_key.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:site78-releases/2026-07-29/backend-arwox-lead-form/gateway-spec.yaml",
+      "type": "config",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/gateway-spec.yaml",
+      "language": "yaml",
+      "symbolCount": 0,
+      "lineCount": 21,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 20,
+      "tags": [
+        "config",
+        "low_signal_summary"
+      ],
+      "summary": "Configuration file: gateway-spec.yaml."
+    },
+    {
+      "id": "file:site78-releases/2026-07-29/backend-arwox-lead-form/index.py",
+      "type": "file",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/index.py",
+      "language": "python",
+      "symbolCount": 19,
+      "lineCount": 509,
+      "complexity": "complex",
+      "pagerank": 0.00724,
+      "communityId": 8,
+      "tags": [
+        "entry_point"
+      ],
+      "summary": "Application module index defining _captcha_page, _captcha_ok, call_b24.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:site78-releases/2026-07-29/backend-arwox-lead-form/merkle.py",
+      "type": "file",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/merkle.py",
+      "language": "python",
+      "symbolCount": 5,
+      "lineCount": 102,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 21,
+      "tags": [],
+      "summary": "Application module merkle defining _sha, merkle_root, build_daily_anchor.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:site78-releases/2026-07-29/backend-arwox-lead-form/test_lead.py",
+      "type": "file",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/test_lead.py",
+      "language": "python",
+      "symbolCount": 18,
+      "lineCount": 178,
+      "complexity": "complex",
+      "pagerank": 0.00724,
+      "communityId": 7,
+      "tags": [
+        "test"
+      ],
+      "summary": "Tests for lead.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:site78-releases/2026-07-29/block9116-content.html",
+      "type": "file",
+      "filePath": "site78-releases/2026-07-29/block9116-content.html",
+      "language": "html",
+      "symbolCount": 0,
+      "lineCount": 6192,
+      "complexity": "complex",
+      "pagerank": 0.00724,
+      "communityId": 22,
+      "tags": [],
+      "summary": "Application module block9116-content."
+    },
+    {
+      "id": "file:src/App.tsx",
+      "type": "file",
+      "filePath": "src/App.tsx",
+      "language": "typescript",
+      "symbolCount": 1,
+      "lineCount": 86,
+      "complexity": "simple",
+      "pagerank": 0.012516,
+      "communityId": 1,
+      "tags": [
+        "entry_point"
+      ],
+      "summary": "Application module App defining App.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/BitrixGPT.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/BitrixGPT.tsx",
+      "language": "typescript",
+      "symbolCount": 4,
+      "lineCount": 289,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module BitrixGPT defining GptTariff, BitrixGPT.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/CaseStudy.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/CaseStudy.tsx",
+      "language": "typescript",
+      "symbolCount": 6,
+      "lineCount": 429,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module CaseStudy defining StatBadge, ResultItem, CaseStudy.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Certificates.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Certificates.tsx",
+      "language": "typescript",
+      "symbolCount": 4,
+      "lineCount": 138,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module Certificates defining Cert, Lightbox, Certificates.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Contact.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Contact.tsx",
+      "language": "typescript",
+      "symbolCount": 13,
+      "lineCount": 759,
+      "complexity": "complex",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Contact defining FormState, FormErrors, validateForm.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/DashboardMock.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/DashboardMock.tsx",
+      "language": "typescript",
+      "symbolCount": 8,
+      "lineCount": 314,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module DashboardMock defining KpiItem, useCounter, KpiCard.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Demo.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Demo.tsx",
+      "language": "typescript",
+      "symbolCount": 2,
+      "lineCount": 94,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Demo defining Demo.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/FAQ.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/FAQ.tsx",
+      "language": "typescript",
+      "symbolCount": 5,
+      "lineCount": 293,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module FAQ defining QA, AccordionItemProps, AccordionItem.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/FloatingMessenger.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/FloatingMessenger.tsx",
+      "language": "typescript",
+      "symbolCount": 2,
+      "lineCount": 100,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module FloatingMessenger defining TelegramIcon, FloatingMessenger.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Footer.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Footer.tsx",
+      "language": "typescript",
+      "symbolCount": 5,
+      "lineCount": 258,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Footer defining TelegramIcon, VKIcon, Footer.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Header.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Header.tsx",
+      "language": "typescript",
+      "symbolCount": 2,
+      "lineCount": 138,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Header defining Header.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Hero.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Hero.tsx",
+      "language": "typescript",
+      "symbolCount": 3,
+      "lineCount": 362,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Hero defining CompetenceRibbon, Hero.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Integrations.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Integrations.tsx",
+      "language": "typescript",
+      "symbolCount": 3,
+      "lineCount": 137,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Integrations defining IntegCard, Integrations.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/LeadMagnetModal.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/LeadMagnetModal.tsx",
+      "language": "typescript",
+      "symbolCount": 6,
+      "lineCount": 262,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module LeadMagnetModal defining LeadMagnetModalProps, FormState, LeadMagnetModal.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Partners.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Partners.tsx",
+      "language": "typescript",
+      "symbolCount": 3,
+      "lineCount": 108,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Partners defining PartnerCard, Partners.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Process.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Process.tsx",
+      "language": "typescript",
+      "symbolCount": 8,
+      "lineCount": 255,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Process defining Step, GuaranteePill, StepConnector.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Results.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Results.tsx",
+      "language": "typescript",
+      "symbolCount": 10,
+      "lineCount": 365,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Results defining ResultCard, ScenarioMetric, Scenario.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/ServicePackages.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/ServicePackages.tsx",
+      "language": "typescript",
+      "symbolCount": 4,
+      "lineCount": 154,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module ServicePackages defining ServicePackage, PackageCard, ServicePackages.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Tariffs.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Tariffs.tsx",
+      "language": "typescript",
+      "symbolCount": 5,
+      "lineCount": 177,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Tariffs defining TariffFeature, TariffPlan, TariffCard.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/Websites.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/Websites.tsx",
+      "language": "typescript",
+      "symbolCount": 3,
+      "lineCount": 259,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 0,
+      "tags": [],
+      "summary": "UI module Websites defining Websites.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/WhyUs.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/WhyUs.tsx",
+      "language": "typescript",
+      "symbolCount": 6,
+      "lineCount": 116,
+      "complexity": "moderate",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module WhyUs defining Icon3DProps, Icon3D, WhyCard.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/landing/atoms.tsx",
+      "type": "file",
+      "filePath": "src/components/landing/atoms.tsx",
+      "language": "typescript",
+      "symbolCount": 17,
+      "lineCount": 405,
+      "complexity": "complex",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module atoms defining ContainerProps, Container, PillProps.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/ui/accordion.tsx",
+      "type": "file",
+      "filePath": "src/components/ui/accordion.tsx",
+      "language": "typescript",
+      "symbolCount": 1,
+      "lineCount": 50,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module accordion (1 symbols).",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/ui/badge.tsx",
+      "type": "file",
+      "filePath": "src/components/ui/badge.tsx",
+      "language": "typescript",
+      "symbolCount": 2,
+      "lineCount": 28,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module badge defining BadgeProps, Badge.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/ui/button.tsx",
+      "type": "file",
+      "filePath": "src/components/ui/button.tsx",
+      "language": "typescript",
+      "symbolCount": 1,
+      "lineCount": 47,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module button defining ButtonProps.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/ui/card.tsx",
+      "type": "file",
+      "filePath": "src/components/ui/card.tsx",
+      "language": "typescript",
+      "symbolCount": 0,
+      "lineCount": 45,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module card.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/ui/input.tsx",
+      "type": "file",
+      "filePath": "src/components/ui/input.tsx",
+      "language": "typescript",
+      "symbolCount": 0,
+      "lineCount": 19,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module input.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/ui/label.tsx",
+      "type": "file",
+      "filePath": "src/components/ui/label.tsx",
+      "language": "typescript",
+      "symbolCount": 0,
+      "lineCount": 17,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module label.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/components/ui/textarea.tsx",
+      "type": "file",
+      "filePath": "src/components/ui/textarea.tsx",
+      "language": "typescript",
+      "symbolCount": 0,
+      "lineCount": 16,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 2,
+      "tags": [],
+      "summary": "UI module textarea.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/lib/utils.ts",
+      "type": "file",
+      "filePath": "src/lib/utils.ts",
+      "language": "typescript",
+      "symbolCount": 1,
+      "lineCount": 4,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 6,
+      "tags": [],
+      "summary": "Service module utils defining cn.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/lib/ym.ts",
+      "type": "file",
+      "filePath": "src/lib/ym.ts",
+      "language": "typescript",
+      "symbolCount": 1,
+      "lineCount": 6,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 23,
+      "tags": [],
+      "summary": "Service module ym defining goal.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:src/main.tsx",
+      "type": "file",
+      "filePath": "src/main.tsx",
+      "language": "typescript",
+      "symbolCount": 0,
+      "lineCount": 5,
+      "complexity": "simple",
+      "pagerank": 0.018625,
+      "communityId": 7,
+      "tags": [
+        "entry_point"
+      ],
+      "summary": "Application module main.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "file:tsconfig.json",
+      "type": "config",
+      "filePath": "tsconfig.json",
+      "language": "json",
+      "symbolCount": 0,
+      "lineCount": 16,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 24,
+      "tags": [
+        "config"
+      ],
+      "summary": "TypeScript compiler configuration."
+    },
+    {
+      "id": "file:vite.config.ts",
+      "type": "file",
+      "filePath": "vite.config.ts",
+      "language": "typescript",
+      "symbolCount": 0,
+      "lineCount": 7,
+      "complexity": "simple",
+      "pagerank": 0.00724,
+      "communityId": 5,
+      "tags": [],
+      "summary": "Application module vite.config.",
+      "primaryOwner": "Claude Code"
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:_canonical",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "_canonical",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:_demo",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "_demo",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:_hmac_key",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "_hmac_key",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:_norm_ip",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "_norm_ip",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:_sign",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "_sign",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:backfill_contact_id",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "backfill_contact_id",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:build_receipt",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "build_receipt",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:extract_request_context",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "extract_request_context",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:http_transport",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "http_transport",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:record_consent",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "record_consent",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:sha256_hex",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "sha256_hex",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:to_json_bytes",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "to_json_bytes",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:to_registry_fields",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "to_registry_fields",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:verify",
+      "type": "function",
+      "filePath": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "name": "verify",
+      "language": "python",
+      "tags": [],
+      "summary": ""
+    },
+    {
+      "id": "function:src/App.tsx:App",
+      "type": "function",
+      "filePath": "src/App.tsx",
+      "name": "App",
+      "language": "typescript",
+      "tags": [],
+      "summary": ""
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:docs/v2-text-reference.tsx",
+      "target": "file:external:@/assets/ai-chip.png",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:docs/v2-text-reference.tsx",
+      "target": "file:external:@/assets/sanatorium.jpg",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:docs/v2-text-reference.tsx",
+      "target": "file:external:@/components/ui/accordion",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:docs/v2-text-reference.tsx",
+      "target": "file:external:@/components/ui/button",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:docs/v2-text-reference.tsx",
+      "target": "file:external:@/components/ui/input",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:docs/v2-text-reference.tsx",
+      "target": "file:external:@/components/ui/textarea",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:docs/v2-text-reference.tsx",
+      "target": "file:external:@tanstack/react-router",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:docs/v2-text-reference.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:docs/v2-text-reference.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:docs/v2-text-reference.tsx",
+      "target": "file:external:sonner",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:eslint.config.js",
+      "target": "file:external:@eslint/js",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:eslint.config.js",
+      "target": "file:external:eslint-plugin-prettier/recommended",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:eslint.config.js",
+      "target": "file:external:eslint-plugin-react-hooks",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:eslint.config.js",
+      "target": "file:external:eslint-plugin-react-refresh",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:eslint.config.js",
+      "target": "file:external:globals",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:eslint.config.js",
+      "target": "file:external:typescript-eslint",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:index.html",
+      "target": "file:src/main.tsx",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:_canonical",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:_demo",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:_hmac_key",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:_norm_ip",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:_sign",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:backfill_contact_id",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:build_receipt",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:extract_request_context",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:http_transport",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:record_consent",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:sha256_hex",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:to_json_bytes",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:to_registry_fields",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "target": "function:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py:verify",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/index.py",
+      "target": "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:site78-releases/2026-07-29/backend-arwox-lead-form/test_lead.py",
+      "target": "file:index.html",
+      "type": "tested_by",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/BitrixGPT",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/CaseStudy",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Certificates",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Contact",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Demo",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/FAQ",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/FloatingMessenger",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Footer",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Header",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Hero",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Integrations",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/LeadMagnetModal",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Partners",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Process",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Results",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/ServicePackages",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Tariffs",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/Websites",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:@/components/landing/WhyUs",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/App.tsx",
+      "target": "function:src/App.tsx:App",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/BitrixGPT.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/BitrixGPT.tsx",
+      "target": "file:external:@/components/ui/button",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/BitrixGPT.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/BitrixGPT.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/CaseStudy.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Certificates.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Certificates.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Contact.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Contact.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Contact.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/DashboardMock.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Demo.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Demo.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Demo.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/FAQ.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/FAQ.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/FAQ.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/FloatingMessenger.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/FloatingMessenger.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/FloatingMessenger.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Footer.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Footer.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Header.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Header.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Header.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Header.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Hero.tsx",
+      "target": "file:external:@/components/landing/DashboardMock",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Hero.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Hero.tsx",
+      "target": "file:external:@/components/ui/button",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Hero.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Hero.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Integrations.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/LeadMagnetModal.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/LeadMagnetModal.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/LeadMagnetModal.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Partners.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Process.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Results.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/ServicePackages.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/ServicePackages.tsx",
+      "target": "file:external:@/components/ui/button",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/ServicePackages.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/ServicePackages.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Tariffs.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Tariffs.tsx",
+      "target": "file:external:@/components/ui/button",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Tariffs.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Tariffs.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Websites.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Websites.tsx",
+      "target": "file:external:@/lib/ym",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/Websites.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/WhyUs.tsx",
+      "target": "file:external:@/components/landing/atoms",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/WhyUs.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/landing/atoms.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/accordion.tsx",
+      "target": "file:external:@/lib/utils",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/accordion.tsx",
+      "target": "file:external:@radix-ui/react-accordion",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/accordion.tsx",
+      "target": "file:external:lucide-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/accordion.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/badge.tsx",
+      "target": "file:external:@/lib/utils",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/badge.tsx",
+      "target": "file:external:class-variance-authority",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/badge.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/button.tsx",
+      "target": "file:external:@/lib/utils",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/button.tsx",
+      "target": "file:external:@radix-ui/react-slot",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/button.tsx",
+      "target": "file:external:class-variance-authority",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/button.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/card.tsx",
+      "target": "file:external:@/lib/utils",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/card.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/input.tsx",
+      "target": "file:external:@/lib/utils",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/input.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/label.tsx",
+      "target": "file:external:@/lib/utils",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/label.tsx",
+      "target": "file:external:@radix-ui/react-label",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/label.tsx",
+      "target": "file:external:class-variance-authority",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/label.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/textarea.tsx",
+      "target": "file:external:@/lib/utils",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/components/ui/textarea.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/lib/utils.ts",
+      "target": "file:external:clsx",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/lib/utils.ts",
+      "target": "file:external:tailwind-merge",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/main.tsx",
+      "target": "file:external:react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/main.tsx",
+      "target": "file:external:react-dom/client",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:src/main.tsx",
+      "target": "file:src/App.tsx",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:vite.config.ts",
+      "target": "file:external:@tailwindcss/vite",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:vite.config.ts",
+      "target": "file:external:@vitejs/plugin-react",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:vite.config.ts",
+      "target": "file:external:node:path",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "file:vite.config.ts",
+      "target": "file:external:vite",
+      "type": "imports",
+      "direction": "forward",
+      "weight": 1.0
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer:ui",
+      "name": "Landing UI Components",
+      "description": "Provides the React/TSX building blocks for the landing page experience, including sections, layout elements, and interactive widgets.",
+      "nodeIds": [
+        "file:src/components/landing/BitrixGPT.tsx",
+        "file:src/components/landing/CaseStudy.tsx",
+        "file:src/components/landing/Certificates.tsx",
+        "file:src/components/landing/Contact.tsx",
+        "file:src/components/landing/DashboardMock.tsx",
+        "file:src/components/landing/Demo.tsx",
+        "file:src/components/landing/FAQ.tsx",
+        "file:src/components/landing/FloatingMessenger.tsx",
+        "file:src/components/landing/Footer.tsx",
+        "file:src/components/landing/Header.tsx",
+        "file:src/components/landing/Hero.tsx",
+        "file:src/components/landing/Integrations.tsx",
+        "file:src/components/landing/LeadMagnetModal.tsx",
+        "file:src/components/landing/Partners.tsx",
+        "file:src/components/landing/Process.tsx",
+        "file:src/components/landing/Results.tsx",
+        "file:src/components/landing/ServicePackages.tsx",
+        "file:src/components/landing/Tariffs.tsx",
+        "file:src/components/landing/Websites.tsx",
+        "file:src/components/landing/WhyUs.tsx",
+        "file:src/components/landing/atoms.tsx",
+        "file:src/components/ui/accordion.tsx",
+        "file:src/components/ui/badge.tsx",
+        "file:src/components/ui/button.tsx",
+        "file:src/components/ui/card.tsx",
+        "file:src/components/ui/input.tsx",
+        "file:src/components/ui/label.tsx",
+        "file:src/components/ui/textarea.tsx"
+      ],
+      "display_order": 0,
+      "order_basis": "canonical"
+    },
+    {
+      "id": "layer:service",
+      "name": "Shared Client Utilities",
+      "description": "Contains small shared TypeScript helpers and integrations used across the front-end codebase.",
+      "nodeIds": [
+        "file:src/lib/utils.ts",
+        "file:src/lib/ym.ts"
+      ],
+      "display_order": 1,
+      "order_basis": "canonical"
+    },
+    {
+      "id": "layer:application",
+      "name": "Web App Setup",
+      "description": "Holds the app entry points and project configuration that wire up React, build tooling, and initial app/HTML structure.",
+      "nodeIds": [
+        "file:CLAUDE.md",
+        "file:components.json",
+        "file:eslint.config.js",
+        "file:index.html",
+        "file:package.json",
+        "file:public/privacy.html",
+        "file:site78-releases/2026-07-29/README.md",
+        "file:site78-releases/2026-07-29/additional-fields-lid362.json",
+        "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+        "file:site78-releases/2026-07-29/backend-arwox-lead-form/gateway-spec.yaml",
+        "file:site78-releases/2026-07-29/backend-arwox-lead-form/index.py",
+        "file:site78-releases/2026-07-29/backend-arwox-lead-form/merkle.py",
+        "file:site78-releases/2026-07-29/block9116-content.html",
+        "file:src/App.tsx",
+        "file:src/main.tsx",
+        "file:tsconfig.json",
+        "file:vite.config.ts"
+      ],
+      "display_order": 2,
+      "order_basis": "canonical"
+    },
+    {
+      "id": "layer:docs-tooling",
+      "name": "Product and Design Docs",
+      "description": "Includes documentation and design/reference notes that guide content, styling decisions, and iterative improvements.",
+      "nodeIds": [
+        "file:docs/HANDOFF.md",
+        "file:docs/landing_text_content.md",
+        "file:docs/technical_prompt_colors_gradients.md",
+        "file:docs/v2-text-reference.tsx",
+        "file:docs/v3-design-spec.md",
+        "file:docs/v3-improvements.md"
+      ],
+      "display_order": 3,
+      "order_basis": "canonical"
+    },
+    {
+      "id": "layer:test",
+      "name": "Lead Form Test Script",
+      "description": "Implements an automated test for the lead form workflow using the backend release code.",
+      "nodeIds": [
+        "file:site78-releases/2026-07-29/backend-arwox-lead-form/test_lead.py"
+      ],
+      "display_order": 4,
+      "order_basis": "canonical"
+    }
+  ],
+  "tour": [
+    {
+      "order": 1,
+      "target_path": "arwox-v3-src",
+      "page_type": "repo_overview",
+      "title": "Repository Overview",
+      "depth": 0,
+      "kind": "overview",
+      "reason": "Start here for the end-to-end picture before diving into the code.",
+      "layer_id": null
+    },
+    {
+      "order": 2,
+      "target_path": "src/main.tsx",
+      "page_type": "file_page",
+      "title": "main.tsx",
+      "depth": 0,
+      "kind": "code",
+      "reason": "An entry point \u2014 execution and imports fan out from here.",
+      "layer_id": "layer:application"
+    },
+    {
+      "order": 3,
+      "target_path": "src/App.tsx",
+      "page_type": "file_page",
+      "title": "App.tsx",
+      "depth": 0,
+      "kind": "code",
+      "reason": "An entry point \u2014 execution and imports fan out from here.",
+      "layer_id": "layer:application"
+    },
+    {
+      "order": 4,
+      "target_path": "eslint.config.js",
+      "page_type": "file_page",
+      "title": "eslint.config.js",
+      "depth": 1,
+      "kind": "code",
+      "reason": "Off the import path from the entry points \u2014 a standalone or supporting file.",
+      "layer_id": "layer:application"
+    },
+    {
+      "order": 5,
+      "target_path": "vite.config.ts",
+      "page_type": "file_page",
+      "title": "vite.config.ts",
+      "depth": 1,
+      "kind": "code",
+      "reason": "Off the import path from the entry points \u2014 a standalone or supporting file.",
+      "layer_id": "layer:application"
+    },
+    {
+      "order": 6,
+      "target_path": "site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+      "page_type": "file_page",
+      "title": "consent.py",
+      "depth": 1,
+      "kind": "code",
+      "reason": "Off the import path from the entry points \u2014 a standalone or supporting file.",
+      "layer_id": "layer:application"
+    },
+    {
+      "order": 7,
+      "target_path": "site78-releases/2026-07-29/backend-arwox-lead-form/index.py",
+      "page_type": "file_page",
+      "title": "index.py",
+      "depth": 1,
+      "kind": "code",
+      "reason": "Off the import path from the entry points \u2014 a standalone or supporting file.",
+      "layer_id": "layer:application"
+    },
+    {
+      "order": 8,
+      "target_path": "site78-releases/2026-07-29/backend-arwox-lead-form/merkle.py",
+      "page_type": "file_page",
+      "title": "merkle.py",
+      "depth": 1,
+      "kind": "code",
+      "reason": "Off the import path from the entry points \u2014 a standalone or supporting file.",
+      "layer_id": "layer:application"
+    },
+    {
+      "order": 9,
+      "target_path": "src/components/landing/BitrixGPT.tsx",
+      "page_type": "file_page",
+      "title": "BitrixGPT.tsx",
+      "depth": 1,
+      "kind": "code",
+      "reason": "Off the import path from the entry points \u2014 a standalone or supporting file.",
+      "layer_id": "layer:ui"
+    },
+    {
+      "order": 10,
+      "target_path": "src/components/landing/CaseStudy.tsx",
+      "page_type": "file_page",
+      "title": "CaseStudy.tsx",
+      "depth": 1,
+      "kind": "code",
+      "reason": "Off the import path from the entry points \u2014 a standalone or supporting file.",
+      "layer_id": "layer:ui"
+    },
+    {
+      "order": 11,
+      "target_path": "src/lib/utils.ts",
+      "page_type": "file_page",
+      "title": "utils.ts",
+      "depth": 1,
+      "kind": "code",
+      "reason": "The Service layer's anchor \u2014 its most depended-on file.",
+      "layer_id": "layer:service"
+    },
+    {
+      "order": 12,
+      "target_path": "site78-releases/2026-07-29/backend-arwox-lead-form/test_lead.py",
+      "page_type": "file_page",
+      "title": "test_lead.py",
+      "depth": 2,
+      "kind": "code",
+      "reason": "The test suite \u2014 how the system's behavior is verified.",
+      "layer_id": "layer:test"
+    }
+  ],
+  "modules": [
+    {
+      "id": "module:src-components",
+      "name": "UI",
+      "path": "src/components",
+      "layerId": "layer:ui",
+      "nodeIds": [
+        "file:src/components/landing/BitrixGPT.tsx",
+        "file:src/components/landing/CaseStudy.tsx",
+        "file:src/components/landing/Certificates.tsx",
+        "file:src/components/landing/Contact.tsx",
+        "file:src/components/landing/DashboardMock.tsx",
+        "file:src/components/landing/Demo.tsx",
+        "file:src/components/landing/FAQ.tsx",
+        "file:src/components/landing/FloatingMessenger.tsx",
+        "file:src/components/landing/Footer.tsx",
+        "file:src/components/landing/Header.tsx",
+        "file:src/components/landing/Hero.tsx",
+        "file:src/components/landing/Integrations.tsx",
+        "file:src/components/landing/LeadMagnetModal.tsx",
+        "file:src/components/landing/Partners.tsx",
+        "file:src/components/landing/Process.tsx",
+        "file:src/components/landing/Results.tsx",
+        "file:src/components/landing/ServicePackages.tsx",
+        "file:src/components/landing/Tariffs.tsx",
+        "file:src/components/landing/Websites.tsx",
+        "file:src/components/landing/WhyUs.tsx",
+        "file:src/components/landing/atoms.tsx",
+        "file:src/components/ui/accordion.tsx",
+        "file:src/components/ui/badge.tsx",
+        "file:src/components/ui/button.tsx",
+        "file:src/components/ui/card.tsx",
+        "file:src/components/ui/input.tsx",
+        "file:src/components/ui/label.tsx",
+        "file:src/components/ui/textarea.tsx"
+      ],
+      "wholeLayer": true,
+      "language": "typescript"
+    },
+    {
+      "id": "module:application",
+      "name": "Application",
+      "path": "",
+      "layerId": "layer:application",
+      "nodeIds": [
+        "file:CLAUDE.md",
+        "file:components.json",
+        "file:eslint.config.js",
+        "file:index.html",
+        "file:package.json",
+        "file:public/privacy.html",
+        "file:site78-releases/2026-07-29/README.md",
+        "file:site78-releases/2026-07-29/additional-fields-lid362.json",
+        "file:site78-releases/2026-07-29/backend-arwox-lead-form/consent.py",
+        "file:site78-releases/2026-07-29/backend-arwox-lead-form/gateway-spec.yaml",
+        "file:site78-releases/2026-07-29/backend-arwox-lead-form/index.py",
+        "file:site78-releases/2026-07-29/backend-arwox-lead-form/merkle.py",
+        "file:site78-releases/2026-07-29/block9116-content.html",
+        "file:src/App.tsx",
+        "file:src/main.tsx",
+        "file:tsconfig.json",
+        "file:vite.config.ts"
+      ],
+      "wholeLayer": true,
+      "language": "json"
+    },
+    {
+      "id": "module:docs",
+      "name": "Docs & Tooling",
+      "path": "docs",
+      "layerId": "layer:docs-tooling",
+      "nodeIds": [
+        "file:docs/HANDOFF.md",
+        "file:docs/landing_text_content.md",
+        "file:docs/technical_prompt_colors_gradients.md",
+        "file:docs/v2-text-reference.tsx",
+        "file:docs/v3-design-spec.md",
+        "file:docs/v3-improvements.md"
+      ],
+      "wholeLayer": true,
+      "language": "markdown"
+    }
+  ]
+}
