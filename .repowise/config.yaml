@@ -1,4 +1,0 @@
-provider: openai
-model: gpt-5.4-nano
-embedder: gemini
-reasoning: auto

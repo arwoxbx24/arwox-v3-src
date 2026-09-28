@@ -1,14 +1,16 @@
 {
   "mcpServers": {
     "repowise": {
-      "command": "repowise",
+      "command": "/root/.local/bin/repowise",
       "args": [
         "mcp",
-        "/root/workspaces/projects/arwox-v3-src",
-        "--transport",
-        "stdio"
+        "--no-workspace"
       ],
-      "description": "repowise: codebase intelligence \u2014 docs, graph, git signals, dead code, decisions"
+      "description": "repowise: codebase intelligence — docs, graph, git signals, dead code, decisions"
+    },
+    "codebase-memory-mcp": {
+      "command": "/root/.local/bin/codebase-memory-mcp",
+      "args": []
     }
   }
 }
