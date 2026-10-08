@@ -15,6 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 
 import consent  # реестр доказуемого согласия (M9.4), тот же каталог
@@ -120,6 +121,11 @@ _FORM_LABELS = {
 }
 
 
+def _journal(rid, t0_ns, stage, **kw):
+    ev = {"request_id": rid, "stage": stage, "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z", "latency_ms": round((time.monotonic_ns() - t0_ns) / 1_000_000, 1)}
+    ev.update({k: kw[k] for k in ("form", "has_name", "has_phone", "has_email", "has_consent", "lead_id", "error", "message", "rejection") if k in kw}); print(json.dumps(ev, ensure_ascii=False))
+
+
 def call_b24(method, params, _retries=3, _backoff=2.0, as_json=False):
     """POST в Bitrix24 REST через вебхук. Ретраи на сетевых и transient-ошибках.
     Возвращает распарсенный dict; на полном отказе — {} (никогда не бросает).
@@ -187,23 +193,32 @@ def handler(event, context):
     if (event.get("httpMethod") or "").upper() != "POST":
         return _redirect("#contact")
 
+    rid, t0 = str(uuid.uuid4()), time.monotonic_ns()
     p = _body_params(event)
     get = lambda k: (p.get(k, [""])[0] or "").strip()
+    phone_raw = get("PHONE")
+    form = get("UTM_CONTENT"); form = form if form in _FORM_LABELS else "unknown"
+    _journal(rid, t0, "received", form=form, has_name=bool(get("NAME")), has_phone=bool(phone_raw), has_email=bool(get("EMAIL")) or ("@" in phone_raw), has_consent=bool(get("CONSENT")))
 
     # Согласие на обработку ПД обязательно — сервер отвергает без него.
     if not get("CONSENT"):
+        _journal(rid, t0, "rejected", rejection="consent")
         return _redirect("?err=consent#contact")
 
     name = get("NAME")
     contact = get("PHONE") or get("EMAIL")  # контактное поле: телефон ИЛИ e-mail
     if not contact and not name:
+        _journal(rid, t0, "rejected", rejection="empty")
         return _redirect("?err=empty#contact")
     # Серверная валидация контакта (2-й уровень после pattern в браузере —
     # работает даже при закэшированной старой разметке): e-mail по форме,
     # телефон = 10-15 цифр после чистки. Мусор («12323») лид не создаёт.
     if contact and not _valid_contact(contact):
+        _journal(rid, t0, "rejected", rejection="contact")
         # инлайн-строка ошибки в форме (#lead-form:target .srv-err), без попапов
         return _redirect("?err=contact#lead-form")
+
+    _journal(rid, t0, "validated")
 
     # Реферер считаем ДО шага капчи: второй POST приходит уже со страницы капчи (forms.arwox.ru),
     # поэтому исходный домен (arwox.ru) переносим скрытым полем REF_ORIGIN; свой домен — не источник.
@@ -272,9 +287,13 @@ def handler(event, context):
     # Метки трафика — только реальные с рекламных площадок (сейчас их нет), поэтому не пишем.
 
     res = call_b24("crm.lead.add", fields)
-    if not res.get("result"):
+    lead_id = res.get("result") if isinstance(res, dict) else None
+    if type(lead_id) is not int or lead_id <= 0:
+        _journal(rid, t0, "b24_error", error="crm_lead_add_failed", message="Lead was not created.")
         # Лид не создан — не врём пользователю про успех.
         return _redirect("?err=server#contact")
+
+    _journal(rid, t0, "b24_lead_ok", lead_id=lead_id)
 
     # Согласие ПДн → дело формата штатной вебформы (PROVIDER_ID=CRM_WEBFORM: жирные
     # структурные поля, как у нативных CRM-форм — рендер подтверждён пробой 26188)
@@ -305,7 +324,7 @@ def handler(event, context):
                 ("string", "CONSENT_DOC", "Документ согласия", CONSENT_DOC_URL),
             ]
             act = call_b24("crm.activity.add", {"fields": {
-                "OWNER_TYPE_ID": 1, "OWNER_ID": res["result"], "TYPE_ID": 6,
+                "OWNER_TYPE_ID": 1, "OWNER_ID": lead_id, "TYPE_ID": 6,
                 "PROVIDER_ID": "CRM_WEBFORM", "PROVIDER_TYPE_ID": "4",
                 "SUBJECT": f"Согласие ПДн получено — {form_label}",
                 "COMPLETED": "Y",
@@ -322,19 +341,23 @@ def handler(event, context):
                              "IP": ip, "LINK": form_url},
                 },
             }}, as_json=True)
-            act_id = act.get("result") if isinstance(act.get("result"), int) else None
+            act_id = act.get("result") if isinstance(act, dict) and type(act.get("result")) is int and act.get("result") > 0 else None
             # Как штатная форма (crm/lib/webform/resultentity.php → Consent::addByContext):
             # ORIGINATOR_ID = код провайдера 'crm/activity', ORIGIN_ID = id дела —
             # UI матчит провайдера по ORIGINATOR_ID и рисует кликабельное «Дело CRM #N».
-            call_b24("userconsent.consent.add", {
+            consent_res = call_b24("userconsent.consent.add", {
                 "AGREEMENT_ID": CONSENT_AGREEMENT_ID,
                 "IP": ip,
                 "URL": (f"https://{ref_origin}" if ref_origin else LANDING),
                 "ORIGINATOR_ID": "crm/activity" if act_id else (contact or name or ""),
                 "ORIGIN_ID": str(act_id) if act_id else f"arwox-lead-form:{form_content or 'form'}",
             })
+            if act_id is not None and isinstance(consent_res, dict) and consent_res.get("result"):
+                _journal(rid, t0, "b24_consent_ok", lead_id=lead_id)
+            else:
+                _journal(rid, t0, "b24_error", error="consent_add_failed", message="Consent was not saved.")
     except Exception:
-        pass  # ponytail: согласие best-effort, лид уже создан — ответ не рушим
+        _journal(rid, t0, "b24_error", error="consent_processing_failed", message="Consent processing failed.")
 
     # Успех только после реального создания лида. Попап → фикс-оверлей #psent (в экране).
     frag = "?ok=1#psent" if form_content == "popup" else "?ok=1#sent"
