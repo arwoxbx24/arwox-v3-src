@@ -299,6 +299,7 @@ if [ "$(jq -r '.fallback_mode // "normal"' <<<"$state")" = outage ] && [ -n "$NP
     le_at=$(jq -r '.le_at // 0' <<<"$state"); now=$(date +%s)
     if [ $((now - le_at)) -ge 900 ]; then
       /root/workspaces/tools/acc1-scripts/actions/npm_ssl_request.sh "{\"proxy_host_id\":\"$NPM_HOST_ID\"}" >/dev/null; rc=$?
+      log "ssl request rc=$rc"
       jq --argjson le_at "$now" '.le_at=$le_at' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
       log le "rc=$rc"
     fi
