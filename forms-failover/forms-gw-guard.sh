@@ -192,6 +192,7 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
   esac
   printf '%s\n' "$state" > "$STATE_FILE"
   rc=0
+  result=
   if [ -n "${FALLBACK_PAGE_ID:-}" ] && [ -n "${FALLBACK_BLOCK_ID:-}" ]; then
     result=$(bash "$FALLBACK_SWITCH" apply "$target" 2>&1); rc=$?
   fi
