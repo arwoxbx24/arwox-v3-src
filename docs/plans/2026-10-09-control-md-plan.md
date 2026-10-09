@@ -17,3 +17,15 @@
 4. `wc -l` каждого файла < 200.
 
 Границы: `.claude/CLAUDE.md` (генерирует repowise) и `docs/*` дизайна не трогать; код не трогать.
+
+## U2 — ТЗ v2: изоляция проектных правил от глобальных (dcfg-jkd6x)
+Причина: слово владельца 09.10 — глобальные и проектные инструкции не смешивать, не перегружать контекст. Дефект U1: `AGENTS.md` повторял законы `projects/CLAUDE.md` и `~/.codex/AGENTS.md`; `CLAUDE.md` импортировал `prd.md` и `architecture.md` на каждый старт.
+
+Решение (ADR): `AGENTS.md` — только дельта проекта (стек, зоны, runtime для prod, инварианты бэкенда и DevOps); `CLAUDE.md` — один импорт `@AGENTS.md`; `prd.md` и `architecture.md` — чтение по требованию.
+
+Источник: code.claude.com/docs/en/memory — «Imports help you organize a long file but don't reduce its context cost, because imported files also load at launch.»
+
+Критерии:
+1. `grep -c -E "^@" CLAUDE.md` → 1.
+2. `grep -c -E "code-channel|ship-post|repowise|csb|ПРИНЦИПЫ|projects/AGENTS.md" AGENTS.md` → 0.
+3. `wc -c` CLAUDE.md + AGENTS.md < 1030 + 5957.
