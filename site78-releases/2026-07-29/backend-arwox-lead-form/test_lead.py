@@ -1,7 +1,11 @@
 """Локальный self-check без сети: парсинг тела + гейт согласия + сборка полей + трейс.
 Запуск: WEBHOOK_URL=x python3 test_lead.py"""
 import os
+import contextlib
+import io
+import tempfile
 import urllib.parse
+from pathlib import Path
 
 os.environ.setdefault("WEBHOOK_URL", "https://example/rest/1/x")
 import index  # noqa: E402
@@ -10,6 +14,12 @@ calls = {}  # method -> последние переданные поля
 def fake_call(method, fields, **kw):
     calls[method] = fields
     return {"result": 42}
+index.call_b24 = fake_call
+
+# Bitrix24 outcome: id is available to the reserve wrapper without changing 302.
+index.call_b24 = lambda *_args, **_kw: {"result": 123}
+assert index._lead_status({}, {}) == "success"
+assert index.B24_OUTCOME.value == "lead:123"
 index.call_b24 = fake_call
 
 
@@ -24,6 +34,22 @@ def ev(pairs, headers=None):
     if headers:
         e["headers"] = headers
     return e
+
+
+with tempfile.TemporaryDirectory() as temp:
+    os.environ["LEAD_SPOOL_DIR"] = temp
+    index.call_b24 = lambda method, *_args, **_kw: ({}, "transient") if method == "crm.lead.add" else {"result": 42}
+    response = index.handler(ev([("NAME", "Ivan"), ("PHONE", "+79001112233"), ("CONSENT", "1")]), None)
+    queued = next(Path(temp).glob("*.json"))
+    assert response["headers"]["Location"].endswith("?ok=1#sent")
+    assert index.B24_OUTCOME.value == f"queue:{queued.name}"
+    index.call_b24 = lambda *_args, **_kw: {"result": 123}
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        index.drain_spool(temp)
+    assert f"spool-sent spool={queued.name} b24=lead:123" in stdout.getvalue()
+os.environ.pop("LEAD_SPOOL_DIR", None)
+index.call_b24 = fake_call
 
 
 # 1. Без согласия — лид не создаётся, редирект на ошибку согласия.
@@ -124,4 +150,4 @@ assert "Реферер: arwox.ru" in calls["crm.lead.add"]["fields[SOURCE_DESCRI
 assert calls["crm.activity.add"]["fields"]["PROVIDER_PARAMS"]["FORM"]["LINK"] == "https://arwox.ru/"
 assert calls["userconsent.consent.add"]["URL"] == "https://arwox.ru"
 
-print("OK: все проверки прошли")
+print("PASS: все проверки прошли")

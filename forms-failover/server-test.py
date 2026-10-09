@@ -27,9 +27,13 @@ def request(port, method, path, body=None, headers=None):
 with tempfile.TemporaryDirectory() as temp:
     Path(temp, "index.py").write_text(
         "import json\n"
+        "import threading\n"
+        "B24_OUTCOME = threading.local()\n"
         "def handler(event, _):\n"
         " if event['path'] == '/boom': raise RuntimeError()\n"
-        " return {'statusCode': 302, 'headers': {'Location': '/?ok=1#sent' if event['httpMethod'] == 'POST' else '/ok'}, 'body': json.dumps(event)}\n"
+        " if event['httpMethod'] == 'POST' and 'CONSENT=0' not in event['body']: B24_OUTCOME.value = 'lead:123'\n"
+        " location = '/?err=consent#contact' if 'CONSENT=0' in event['body'] else '/?ok=1#sent' if event['httpMethod'] == 'POST' else '/ok'\n"
+        " return {'statusCode': 302, 'headers': {'Location': location}, 'body': json.dumps(event)}\n"
     )
     probe = socket.socket()
     probe.bind(("127.0.0.1", 0))
@@ -49,13 +53,15 @@ with tempfile.TemporaryDirectory() as temp:
         event = json.loads(body)
         assert status == 302 and headers["Location"] == "/ok"
         assert event["httpMethod"] == "GET" and event["queryStringParameters"]["a"] == "1"
-        status, _, body = request(port, "POST", "/", "NAME=x&PHONE=1", {"X-Real-IP": "9.9.9.9", "X-Real-Remote-Address": "6.6.6.6"})
+        status, _, body = request(port, "POST", "/", "NAME=Alice&PHONE=79990001122&EMAIL=alice%40example.test", {"X-Real-IP": "9.9.9.9", "X-Real-Remote-Address": "6.6.6.6"})
         event = json.loads(body)
-        assert status == 302 and "NAME=x" in event["body"]
+        assert status == 302 and "NAME=Alice" in event["body"]
         assert event["headers"]["X-Real-Remote-Address"] == "9.9.9.9"
         lead_log = process.stdout.readline().strip()
-        assert "forms-backup lead " in lead_log and "code=302 result=sent" in lead_log
-        assert "NAME=x" not in lead_log and "PHONE=1" not in lead_log
+        assert "forms-backup lead " in lead_log and "code=302 result=sent b24=lead:123" in lead_log
+        assert all(value not in lead_log for value in ("Alice", "79990001122", "alice@example.test"))
+        assert request(port, "POST", "/", "CONSENT=0")[0] == 302
+        assert process.stdout.readline().strip().endswith("result=err:consent b24=-")
         assert request(port, "GET", "/boom")[0] == 502
         print("PASS 3/3")
     finally:

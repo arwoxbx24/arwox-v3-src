@@ -5,15 +5,31 @@ DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 GW=${DNS_GW_CNAME:-d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net}
 BEGET_IP=${BEGET_IP:-45.139.76.176}
 export BEGET_IP
+usage() { printf 'usage: %s test [--prod] [--no-feed]\n       %s restore [--prod]\n       %s status [--prod]\n' "$0" "$0" "$0" >&2; }
+
+COMMAND=${1:-}
+case "$COMMAND" in
+  -h|--help) usage; exit 0 ;;
+  test|restore|status) shift ;;
+  *) usage; exit 64 ;;
+esac
+NO_FEED=0
+for arg in "$@"; do
+  case "$arg" in
+    --prod) export FORMS_FQDN=forms.arwox.ru ;;
+    --no-feed) [ "$COMMAND" = test ] || { usage; exit 64; }; NO_FEED=1 ;;
+    *) usage; exit 64 ;;
+  esac
+done
 case "${FORMS_FQDN:-forms-test.arwox.ru}" in
   forms-test.arwox.ru|forms.arwox.ru) FQDN=${FORMS_FQDN:-forms-test.arwox.ru} ;;
   *) printf 'refused: only forms-test.arwox.ru\n' >&2; exit 2 ;;
 esac
 mkdir -p "$DIR/state"
-STATE="$DIR/state/demo.json"
+STATE="$DIR/state/demo-$FQDN.json"
 LOG="$DIR/state/demo.log"
 LOCK="$DIR/state/demo.lock"
-TIMER_PID="$DIR/state/demo.timer.pid"
+TIMER_PID="$DIR/state/demo-$FQDN.timer.pid"
 if [ "$FQDN" = forms.arwox.ru ]; then
   GUARD_LOG=${GUARD_LOG:-/root/.pm2/logs/forms-gw-guard-out.log}
   GUARD_ERR=${GUARD_ERR:-/root/.pm2/logs/forms-gw-guard-error.log}
@@ -21,16 +37,6 @@ else
   GUARD_LOG=${GUARD_LOG:-/root/.pm2/logs/forms-gw-guard-test-out.log}
   GUARD_ERR=${GUARD_ERR:-/root/.pm2/logs/forms-gw-guard-test-error.log}
 fi
-usage() { printf 'usage: %s status|simulate [--no-feed]|restore\n' "$0" >&2; exit 64; }
-
-COMMAND=${1:-}
-NO_FEED=0
-if [ "$COMMAND" = simulate ] && [ "${2:-}" = --no-feed ]; then NO_FEED=1; fi
-case "$COMMAND" in
-  status|restore) [ "$#" = 1 ] || usage ;;
-  simulate) { [ "$#" = 1 ] || { [ "$#" = 2 ] && [ "$2" = --no-feed ]; }; } || usage ;;
-  *) usage ;;
-esac
 BACKUP_LOG=${BACKUP_LOG:-/root/.pm2/logs/forms-backup-out.log}
 
 STEP_1='Сбой Яндекса имитирован'
@@ -85,28 +91,46 @@ cancel_auto_restore() {
 }
 start_auto_restore() {
   auto_restore_started=$(date +%s)
-  setsid nohup bash -c 'export DEMO_AUTO_RESTORE=1; sleep "$1"; FORMS_FQDN="$2" "$3/demo.sh" restore' _ "${AUTO_RESTORE_SEC:-900}" "$FQDN" "$DIR" </dev/null >/dev/null 2>&1 &
+  setsid nohup bash -c 'export DEMO_AUTO_RESTORE=1; sleep "$1"; FORMS_FQDN="$2" "$3/forms-ctl.sh" restore' _ "${AUTO_RESTORE_SEC:-900}" "$FQDN" "$DIR" </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$TIMER_PID"
   printf '⏱ Автовозврат на Яндекс через 15 мин\n'
 }
 lead_feed() {
-  local started=$1 line_count=0 seen=0 accepted=0 errors=0 now remaining at host code result clock
+  local started=$1 line_count=0 seen=0 accepted=0 errors=0 b24_leads=0 b24_queue=0 now remaining at host code result b24 b24_text clock queued_spools= spool
   seen=${backup_log_start:-0}
-  trap 'printf "🏆 Резерв принял %s заявок (✅ %s, ❌ %s). В Bitrix24 у них комментарий «Форма была отправлена во время сбоя…»\n" "$((accepted + errors))" "$accepted" "$errors"; printf "⏱ Автовозврат на Яндекс сработает сам\n"; exit 130' INT TERM
+  trap 'printf "🏆 Резерв принял %s заявок (✅ %s, ❌ %s). В Bitrix24: %s, в очереди: %s\n" "$((accepted + errors))" "$accepted" "$errors" "$b24_leads" "$b24_queue"; printf "⏱ Автовозврат на Яндекс сработает сам\n"; exit 130' INT TERM
   while :; do
     if [ -r "$BACKUP_LOG" ]; then
       line_count=$(wc -l < "$BACKUP_LOG")
       if [ "$line_count" -lt "$seen" ]; then seen=0; fi
       while IFS= read -r line; do
         case "$line" in
-          *"forms-backup lead "*) read -r at host code result <<< "${line#*forms-backup lead }" ;;
+          *"forms-backup spool-sent "*)
+            read -r spool b24 <<< "${line#*forms-backup spool-sent }"
+            spool=${spool#spool=}
+            if [[ "$b24" =~ ^b24=lead:([0-9]+)$ ]]; then
+              if [[ " $queued_spools " == *" $spool "* ]]; then
+                b24_queue=$((b24_queue - 1))
+                b24_leads=$((b24_leads + 1))
+                printf '📬 из очереди: Bitrix24 лид #%s\n' "${BASH_REMATCH[1]}"
+              fi
+            fi
+            continue
+            ;;
+          *"forms-backup lead "*) read -r at host code result b24 <<< "${line#*forms-backup lead }" ;;
           *) continue ;;
         esac
         [ "$host" = "host=$FQDN" ] || continue
         clock=${at#*T}; clock=${clock%Z}
+        case "$b24" in
+          b24=lead:*) b24_leads=$((b24_leads + 1)); b24_text=" → Bitrix24 лид #${b24#b24=lead:}" ;;
+          b24=queue:*) b24_queue=$((b24_queue + 1)); queued_spools="$queued_spools ${b24#b24=queue:}"; b24_text=' → очередь резерва, дошлётся сам' ;;
+          b24=-) b24_text=' → в Bitrix24 не передана' ;;
+          *) b24_text= ;;
+        esac
         case "$result" in
-          result=sent) accepted=$((accepted + 1)); printf '🎯 Заявка №%s принята РЕЗЕРВОМ %s в %s → ✅ #sent\n' "$((accepted + errors))" "$BEGET_IP" "$clock" ;;
-          result=err:*) errors=$((errors + 1)); printf '🎯 Заявка №%s принята РЕЗЕРВОМ %s в %s → ❌ %s\n' "$((accepted + errors))" "$BEGET_IP" "$clock" "${result#result=}" ;;
+          result=sent) accepted=$((accepted + 1)); printf '🎯 Заявка №%s принята РЕЗЕРВОМ %s в %s → ✅ #sent%s\n' "$((accepted + errors))" "$BEGET_IP" "$clock" "$b24_text" ;;
+          result=err:*) errors=$((errors + 1)); printf '🎯 Заявка №%s принята РЕЗЕРВОМ %s в %s → ❌ %s%s\n' "$((accepted + errors))" "$BEGET_IP" "$clock" "${result#result=}" "$b24_text" ;;
         esac
       done < <(sed -n "$((seen + 1)),$line_count p" "$BACKUP_LOG")
       seen=$line_count
@@ -120,7 +144,7 @@ lead_feed() {
     [ "$remaining" -lt 5 ] && sleep "$remaining" || sleep 5
   done
   trap 'exit 130' INT TERM
-  printf '🏆 Резерв принял %s заявок (✅ %s, ❌ %s). В Bitrix24 у них комментарий «Форма была отправлена во время сбоя…»\n' "$((accepted + errors))" "$accepted" "$errors"
+  printf '🏆 Резерв принял %s заявок (✅ %s, ❌ %s). В Bitrix24: %s, в очереди: %s\n' "$((accepted + errors))" "$accepted" "$errors" "$b24_leads" "$b24_queue"
   printf '⏱ Автовозврат на Яндекс сработает сам\n'
 }
 elapsed_minutes() { printf '%s\n' "$(( ($(date +%s) - $1 + 59) / 60 ))"; }
@@ -252,7 +276,7 @@ wait_for_certificate() {
   done
 }
 
-case ${1:-} in
+case "$COMMAND" in
   status)
     record dns-status "command=dns-switch.sh status --fqdn $FQDN"
     if dns=$($DIR/dns-switch.sh status --fqdn "$FQDN"); then rc=0; else rc=$?; fi
@@ -260,7 +284,7 @@ case ${1:-} in
     [ "$rc" = 0 ] || exit "$rc"
     printf 'dns=%s yandex=HTTP %s backup=HTTP %s\n' "$dns" "$(yandex_code)" "$(backup_code)"
     ;;
-  simulate)
+  test)
     lock_demo
     guard_log_start=0
     [ -r "$GUARD_LOG" ] && guard_log_start=$(wc -l < "$GUARD_LOG")
@@ -272,7 +296,7 @@ case ${1:-} in
     record yc-get "rc=$rc"
     [ "$rc" = 0 ] || exit "$rc"
     domain_id=$(jq -r --arg fqdn "$FQDN" '.attached_domains[] | select(.domain == $fqdn) | .domain_id' <<< "$gateway" | tail -1)
-    if [ -z "$domain_id" ] || [ "$domain_id" = null ]; then printf 'ℹ️ Сбой уже имитирован — сначала ./demo.sh restore\n'; exit 0; fi
+    if [ -z "$domain_id" ] || [ "$domain_id" = null ]; then printf 'ℹ️ Сбой уже имитирован — сначала ./forms-ctl.sh restore\n'; exit 0; fi
     record yc-remove "command=yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id <domain-id>"
     if yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id "$domain_id"; then rc=0; else rc=$?; fi
     record yc-remove "rc=$rc"
@@ -288,7 +312,7 @@ case ${1:-} in
     response=$(mktemp "$DIR/state/demo.XXXXXX")
     headers=$(mktemp "$DIR/state/demo.XXXXXX")
     record backup-post "command=curl POST --resolve $FQDN:443:$BEGET_IP"
-    if meta=$(curl -sS -D "$headers" -o "$response" -w '%{http_code} %{ssl_verify_result} %{remote_ip}' --max-time 15 -X POST --resolve "$FQDN:443:$BEGET_IP" "https://$FQDN/" -d 'NAME=ТЕСТ demo.sh&PHONE=%2B70000000000&CONSENT=Y'); then rc=0; else rc=$?; fi
+    if meta=$(curl -sS -D "$headers" -o "$response" -w '%{http_code} %{ssl_verify_result} %{remote_ip}' --max-time 15 -X POST --resolve "$FQDN:443:$BEGET_IP" "https://$FQDN/" -d 'NAME=ТЕСТ forms-ctl.sh&PHONE=%2B70000000000&CONSENT=Y'); then rc=0; else rc=$?; fi
     read -r code ssl_verify_result remote_ip <<< "${meta:-000 none none}"
     location=$(awk 'BEGIN { IGNORECASE=1 } /^location:/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$headers")
     record backup-post "HTTP=$code ssl_verify_result=${ssl_verify_result:-none} remote_ip=${remote_ip:-none} Location=${location:-none} rc=$rc"
@@ -307,6 +331,7 @@ case ${1:-} in
     ;;
   restore)
     lock_demo
+    restore_started=$(date +%s)
     if [ "${DEMO_AUTO_RESTORE:-}" = 1 ]; then rm -f "$TIMER_PID"; else cancel_auto_restore; fi
     guard_log_start=0
     [ -r "$GUARD_LOG" ] && guard_log_start=$(wc -l < "$GUARD_LOG")
@@ -332,18 +357,17 @@ case ${1:-} in
     fi
     started=$(jq -r '.started // empty' "$STATE" 2>/dev/null || true)
     started=${started:-$(date +%s)}
-    if wait_for "$GW" "$started" '' '' 600; then
+    if wait_for "$GW" "$restore_started" '' '' 600; then
       :
     else
       rc=$?
       [ "$rc" = 124 ] || exit "$rc"
       "$DIR/dns-switch.sh" apply normal --fqdn "$FQDN"
       printf '⚠️ сторож не вернул DNS — возвращено тестом\n'
-      wait_for "$GW" "$started" '' '' 600
+      wait_for "$GW" "$(date +%s)" '' '' 600
     fi
     record step-4 "gateway=$GW"
     printf '4) Возврат на Яндекс: %s (всего %s мин)\n' "$(date -u +%T)" "$(elapsed_minutes "$started")"
     [ "$attached" = 0 ] || printf '✅ Уже восстановлено\n'
     ;;
-  *) usage ;;
 esac
