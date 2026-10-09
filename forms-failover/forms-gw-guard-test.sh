@@ -509,13 +509,25 @@ case23() { # DNS failure stays in dns-switch notification channel
     jq -e '(.fallback_mode // "normal") != "outage"' "$tmp/state/state.json" >/dev/null
 }
 
-for i in {1..23}; do
+case24() { # DNS-only fallback enters outage without an unbound result
+  snapshot_setup
+  export FALLBACK_PAGE_ID= FALLBACK_BLOCK_ID= DNS_SWITCH="$tmp/dns-ok.sh"
+  printf '#!/usr/bin/env bash\nprintf "switched normal→outage\\n"\nexit 0\n' > "$DNS_SWITCH"
+  chmod +x "$DNS_SWITCH"
+  run_guard; run_guard
+  jq -e '.fallback_mode == "outage"' "$tmp/state/state.json" >/dev/null && \
+    grep -q 'резервный канал' "$tmp/sent.log" && \
+    grep -q 'sent fallback_outage' "$tmp/guard.log" && \
+    ! grep -q 'unbound variable' "$tmp/guard.log"
+}
+
+for i in {1..24}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/23\n' "$PASS"
+  printf 'PASS %d/24\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/23 (PASS %d/23)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/24 (PASS %d/24)\n' "$FAIL" "$PASS"
   exit 1
 fi
