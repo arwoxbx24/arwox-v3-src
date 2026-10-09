@@ -56,18 +56,22 @@ esac
 EOF
   cat > "$TMP/run/bin/curl" <<'EOF'
 #!/usr/bin/env bash
-out= headers= method=GET resolve= url= prev=
+out= headers= method=GET resolve= url= prev= data=
 for arg in "$@"; do
   if [ -n "$prev" ]; then
-    case "$prev" in -o) out=$arg ;; -D) headers=$arg ;; -X) method=$arg ;; --resolve) resolve=$arg ;; esac
+    case "$prev" in -o) out=$arg ;; -D) headers=$arg ;; -X) method=$arg ;; --resolve) resolve=$arg ;; data) data=$arg ;; esac
     prev=; continue
   fi
-  case "$arg" in -o|-D|-X|--resolve|-w|--max-time|-d) prev=$arg ;; -s|-sS) ;; http://*|https://*) url=$arg ;; esac
+  case "$arg" in -o|-D|-X|--resolve|-w|--max-time) prev=$arg ;; -d) prev=data ;; -s|-sS) ;; http://*|https://*) url=$arg ;; esac
 done
 if [ "$method" = POST ]; then
-  [ -z "$out" ] || printf '<script src="smartcaptcha.yandexcloud.net/captcha.js"></script>\n' > "$out"
-  [ -z "$headers" ] || : > "$headers"
-  printf '200 0 203.0.113.10\n'
+  [ -z "$data" ] || printf '%s\n' "$data" > "$DEMO_TMP/post-body"
+  [ -z "$out" ] || printf '%s\n' "${CURL_POST_BODY:-<script src=\"smartcaptcha.yandexcloud.net/captcha.js\"></script>}" > "$out"
+  if [ -n "$headers" ]; then
+    : > "$headers"
+    [ -z "${CURL_POST_LOCATION:-}" ] || printf 'Location: %s\r\n' "$CURL_POST_LOCATION" >> "$headers"
+  fi
+  printf '%s 0 203.0.113.10\n' "${CURL_POST_CODE:-200}"
   exit 0
 fi
 case "$resolve" in *":443:$BEGET_IP")
@@ -135,10 +139,32 @@ case8() { # child dns-switch receives BEGET_IP and recognizes outage
   out=$(run_demo status 2>"$TMP/err"); rc=$?
   [ "$rc" = 0 ] && grep -Fq 'dns=outage' <<< "$out"
 }
+case9() { # accepted lead redirects to ok
+  setup A
+  out=$(CURL_POST_CODE=302 CURL_POST_LOCATION='https://arwox.ru/?ok=1#sent' run_demo simulate 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] && grep -Fq '5/5' <<< "$out" && grep -Fq 'лид принят резервом' <<< "$out"
+}
+case10() { # captcha response remains an accepted reserve check
+  setup A
+  out=$(run_demo simulate 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] && grep -Fq '5/5' <<< "$out" && grep -Fq 'капча включена' <<< "$out"
+}
+case11() { # consent rejection is not an accepted lead
+  setup A
+  CURL_POST_CODE=302 CURL_POST_LOCATION='https://arwox.ru/?err=consent#contact' run_demo simulate >"$TMP/out" 2>"$TMP/err"; rc=$?
+  [ "$rc" -ne 0 ] && grep -Fq '❌ Этап 5/5' "$TMP/err" || return 1
+  setup A
+  CURL_POST_CODE=302 CURL_POST_LOCATION='https://arwox.ru/?ok=10#sent' run_demo simulate >"$TMP/out" 2>"$TMP/err"; rc=$?
+  [ "$rc" -ne 0 ] && grep -Fq '❌ Этап 5/5' "$TMP/err"
+}
+case12() { # probe explicitly carries consent
+  setup A
+  run_demo simulate >"$TMP/out" 2>"$TMP/err" && grep -Fq 'CONSENT=Y' "$TMP/post-body"
+}
 
 PASS=0
 FAIL=0
-for i in {1..8}; do
+for i in {1..12}; do
   if "case$i"; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); printf 'FAIL case %s\n' "$i"; fi
 done
-if [ "$FAIL" = 0 ]; then printf 'PASS %d/8\n' "$PASS"; else printf 'FAIL %d/8 (PASS %d/8)\n' "$FAIL" "$PASS"; exit 1; fi
+if [ "$FAIL" = 0 ]; then printf 'PASS %d/12\n' "$PASS"; else printf 'FAIL %d/12 (PASS %d/12)\n' "$FAIL" "$PASS"; exit 1; fi

@@ -221,15 +221,20 @@ case ${1:-} in
     response=$(mktemp "$DIR/state/demo.XXXXXX")
     headers=$(mktemp "$DIR/state/demo.XXXXXX")
     record backup-post "command=curl POST --resolve $FQDN:443:$BEGET_IP"
-    if meta=$(curl -sS -D "$headers" -o "$response" -w '%{http_code} %{ssl_verify_result} %{remote_ip}' --max-time 15 -X POST --resolve "$FQDN:443:$BEGET_IP" "https://$FQDN/" -d 'NAME=demo&PHONE=%2B70000000000'); then rc=0; else rc=$?; fi
+    if meta=$(curl -sS -D "$headers" -o "$response" -w '%{http_code} %{ssl_verify_result} %{remote_ip}' --max-time 15 -X POST --resolve "$FQDN:443:$BEGET_IP" "https://$FQDN/" -d 'NAME=ТЕСТ demo.sh&PHONE=%2B70000000000&CONSENT=Y'); then rc=0; else rc=$?; fi
     read -r code ssl_verify_result remote_ip <<< "${meta:-000 none none}"
     location=$(awk 'BEGIN { IGNORECASE=1 } /^location:/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$headers")
     record backup-post "HTTP=$code ssl_verify_result=${ssl_verify_result:-none} remote_ip=${remote_ip:-none} Location=${location:-none} rc=$rc"
-    if [ "$code" = 200 ] && grep -q 'smartcaptcha.yandexcloud.net/captcha.js' "$response"; then
+    ok_location_re='(^|[?&])ok=1([&#]|$)'
+    if { [ "$code" = 302 ] && [[ "$location" =~ $ok_location_re ]]; } || { [ "$code" = 200 ] && grep -q 'smartcaptcha.yandexcloud.net/captcha.js' "$response"; }; then
       complete_stage 5 "$STEP_5" "$started"
-      printf '🏁 Тест пройден: 5/5 за %s мин\n' "$(elapsed_minutes "$started")"
+      if [ "$code" = 302 ]; then
+        printf '🏁 Тест пройден: 5/5 за %s мин (лид принят резервом)\n' "$(elapsed_minutes "$started")"
+      else
+        printf '🏁 Тест пройден: 5/5 за %s мин (резерв доступен, капча включена)\n' "$(elapsed_minutes "$started")"
+      fi
     else
-      printf '❌ Этап 5/5: заявка не принята резервом: HTTP %s\n' "${code:-000}" >&2; exit 1
+      printf '❌ Этап 5/5: заявка не принята резервом: HTTP %s Location=%s\n' "${code:-000}" "${location:-none}" >&2; exit 1
     fi
     ;;
   restore)
