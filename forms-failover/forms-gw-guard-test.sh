@@ -51,6 +51,9 @@ for arg in "$@"; do
   esac
 done
 printf '%s\n' "$@" >> "$GUARD_TEST_TMP/curl.argv.log"
+if [ -n "$use_resolve" ] && [[ "$url" = https://* ]] && [ "$(cat "$GUARD_TEST_TMP/forms.code")" = 000 ]; then
+  exit 1
+fi
 if [ -n "$use_k" ]; then
   while IFS= read -r line; do
     case "$line" in
@@ -521,13 +524,55 @@ case24() { # DNS-only fallback enters outage without an unbound result
     ! grep -q 'unbound variable' "$tmp/guard.log"
 }
 
-for i in {1..24}; do
+case25() { # failed DNS outage captures once without fallback notification
+  snapshot_setup
+  export FALLBACK_PAGE_ID= FALLBACK_BLOCK_ID= DNS_SWITCH="$tmp/dns-fail.sh"
+  printf '#!/usr/bin/env bash\nprintf "refused: precheck NET\\n"\nexit 1\n' > "$DNS_SWITCH"
+  chmod +x "$DNS_SWITCH"
+  : > "$tmp/guard.log"
+  for i in {1..3}; do bash "$GUARD" >> "$tmp/guard.log" 2>&1; done
+  [ "$(find "$GUARD_STATE_DIR/incidents" -mindepth 1 -maxdepth 1 -type d | wc -l)" = 1 ] && \
+    [ "$(grep -c 'snapshot:' "$tmp/guard.log")" = 1 ] && \
+    ! grep -q 'sent fallback_outage' "$tmp/guard.log"
+}
+
+case26() { # successful transition clears the failed-DNS snapshot gate
+  snapshot_setup
+  export FALLBACK_PAGE_ID= FALLBACK_BLOCK_ID= DNS_SWITCH="$tmp/dns-switch.sh"
+  printf '#!/usr/bin/env bash\nprintf "refused: precheck NET\\n"\nexit 1\n' > "$DNS_SWITCH"
+  chmod +x "$DNS_SWITCH"
+  run_guard; run_guard
+  printf '#!/usr/bin/env bash\nprintf "switched normal→outage\\n"\n' > "$DNS_SWITCH"
+  printf '20261009T000002Z\n' > "$GUARD_TEST_TMP/snapshot.timestamp"
+  run_guard
+  jq -e '(.fallback_mode == "outage") and (has("dns_fail_snapshot") | not)' "$GUARD_STATE_DIR/state.json" >/dev/null || return 1
+  printf '302\n' > "$tmp/forms.code"
+  run_guard; run_guard
+  printf '#!/usr/bin/env bash\nprintf "refused: precheck NET\\n"\nexit 1\n' > "$DNS_SWITCH"
+  printf '20261009T000003Z\n' > "$GUARD_TEST_TMP/snapshot.timestamp"
+  printf '000\n' > "$tmp/forms.code"
+  run_guard; run_guard
+  [ "$(find "$GUARD_STATE_DIR/incidents" -mindepth 1 -maxdepth 1 -type d | wc -l)" = 3 ]
+}
+
+case27() { # certificate logging has one rc line
+  snapshot_setup
+  printf '{"fallback_mode":"outage"}\n' > "$GUARD_STATE_DIR/state.json"
+  export NPM_HOST_ID=40 BEGET_IP=203.0.113.10 NPM_SSL_REQUEST="$tmp/npm_ssl_request.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$tmp/npm_ssl_request.sh"
+  chmod +x "$tmp/npm_ssl_request.sh"
+  run_guard
+  [ "$(grep -c 'ssl request rc=' "$tmp/guard.log")" = 1 ] && \
+    [ "$(grep -c ' le rc=' "$tmp/guard.log")" = 0 ]
+}
+
+for i in {1..27}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/24\n' "$PASS"
+  printf 'PASS %d/27\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/24 (PASS %d/24)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/27 (PASS %d/27)\n' "$FAIL" "$PASS"
   exit 1
 fi
