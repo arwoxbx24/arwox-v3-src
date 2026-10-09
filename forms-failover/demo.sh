@@ -6,17 +6,32 @@ GW=${DNS_GW_CNAME:-d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net}
 BEGET_IP=${BEGET_IP:-45.139.76.176}
 export BEGET_IP
 case "${FORMS_FQDN:-forms-test.arwox.ru}" in
-  forms-test.arwox.ru) FQDN=forms-test.arwox.ru ;;
-  forms.arwox.ru) printf 'refused: production FQDN\n' >&2; exit 2 ;;
+  forms-test.arwox.ru|forms.arwox.ru) FQDN=${FORMS_FQDN:-forms-test.arwox.ru} ;;
   *) printf 'refused: only forms-test.arwox.ru\n' >&2; exit 2 ;;
 esac
 mkdir -p "$DIR/state"
 STATE="$DIR/state/demo.json"
 LOG="$DIR/state/demo.log"
 LOCK="$DIR/state/demo.lock"
-GUARD_LOG=${GUARD_LOG:-/root/.pm2/logs/forms-gw-guard-test-out.log}
-GUARD_ERR=${GUARD_ERR:-/root/.pm2/logs/forms-gw-guard-test-error.log}
+TIMER_PID="$DIR/state/demo.timer.pid"
+if [ "$FQDN" = forms.arwox.ru ]; then
+  GUARD_LOG=${GUARD_LOG:-/root/.pm2/logs/forms-gw-guard-out.log}
+  GUARD_ERR=${GUARD_ERR:-/root/.pm2/logs/forms-gw-guard-error.log}
+else
+  GUARD_LOG=${GUARD_LOG:-/root/.pm2/logs/forms-gw-guard-test-out.log}
+  GUARD_ERR=${GUARD_ERR:-/root/.pm2/logs/forms-gw-guard-test-error.log}
+fi
+usage() { printf 'usage: %s status|simulate [--no-feed]|restore\n' "$0" >&2; exit 64; }
+
 COMMAND=${1:-}
+NO_FEED=0
+if [ "$COMMAND" = simulate ] && [ "${2:-}" = --no-feed ]; then NO_FEED=1; fi
+case "$COMMAND" in
+  status|restore) [ "$#" = 1 ] || usage ;;
+  simulate) { [ "$#" = 1 ] || { [ "$#" = 2 ] && [ "$2" = --no-feed ]; }; } || usage ;;
+  *) usage ;;
+esac
+BACKUP_LOG=${BACKUP_LOG:-/root/.pm2/logs/forms-backup-out.log}
 
 STEP_1='Сбой Яндекса имитирован'
 STEP_2='Сторож заметил сбой'
@@ -35,7 +50,6 @@ trap finish EXIT
 trap 'exit 130' INT TERM
 record start "fqdn=$FQDN"
 
-usage() { printf 'usage: %s status|simulate|restore\n' "$0" >&2; exit 64; }
 yandex_code() {
   local ip code=000 rc=0
   ip=$(dig +short "$GW" | tail -1)
@@ -62,6 +76,47 @@ lock_demo() {
     exit 75
   fi
   printf '%s\n' "$(date -u +%FT%TZ)" > "$LOCK"
+}
+cancel_auto_restore() {
+  local pid=
+  [ -r "$TIMER_PID" ] && read -r pid < "$TIMER_PID"
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null || true; fi
+  rm -f "$TIMER_PID"
+}
+start_auto_restore() {
+  setsid nohup bash -c 'export DEMO_AUTO_RESTORE=1; sleep "$1"; FORMS_FQDN="$2" "$3/demo.sh" restore' _ "${AUTO_RESTORE_SEC:-900}" "$FQDN" "$DIR" </dev/null >/dev/null 2>&1 &
+  printf '%s\n' "$!" > "$TIMER_PID"
+  printf '⏱ Автовозврат на Яндекс через 15 мин\n'
+}
+lead_feed() {
+  local started=$1 line_count=0 seen=0 accepted=0 errors=0 now remaining at host code result clock
+  seen=${backup_log_start:-0}
+  trap 'printf "🏆 Резерв принял %s заявок (✅ %s, ❌ %s). В Bitrix24 у них комментарий «Форма была отправлена во время сбоя…»\n" "$((accepted + errors))" "$accepted" "$errors"; printf "⏱ Автовозврат на Яндекс сработает сам\n"; exit 130' INT TERM
+  while :; do
+    if [ -r "$BACKUP_LOG" ]; then
+      line_count=$(wc -l < "$BACKUP_LOG")
+      if [ "$line_count" -lt "$seen" ]; then seen=0; fi
+      while read -r _ _ at host code result; do
+        [ "$host" = "host=$FQDN" ] || continue
+        clock=${at#*T}; clock=${clock%Z}
+        case "$result" in
+          result=sent) accepted=$((accepted + 1)); printf '🎯 Заявка №%s принята РЕЗЕРВОМ %s в %s → ✅ #sent\n' "$((accepted + errors))" "$BEGET_IP" "$clock" ;;
+          result=err:*) errors=$((errors + 1)); printf '🎯 Заявка №%s принята РЕЗЕРВОМ %s в %s → ❌ %s\n' "$((accepted + errors))" "$BEGET_IP" "$clock" "${result#result=}" ;;
+        esac
+      done < <(sed -n "$((seen + 1)),$line_count p" "$BACKUP_LOG")
+      seen=$line_count
+    fi
+    now=$(date +%s)
+    remaining=$(( ${AUTO_RESTORE_SEC:-900} - (now - started) ))
+    [ "$remaining" -gt 0 ] || break
+    if [ $(((now - started) % 30)) = 0 ]; then
+      printf '⏳ Окно теста: осталось %02d:%02d | принято резервом: %s\n' "$((remaining / 60))" "$((remaining % 60))" "$((accepted + errors))"
+    fi
+    [ "$remaining" -lt 5 ] && sleep "$remaining" || sleep 5
+  done
+  trap 'exit 130' INT TERM
+  printf '🏆 Резерв принял %s заявок (✅ %s, ❌ %s). В Bitrix24 у них комментарий «Форма была отправлена во время сбоя…»\n' "$((accepted + errors))" "$accepted" "$errors"
+  printf '⏱ Автовозврат на Яндекс сработает сам\n'
 }
 elapsed_minutes() { printf '%s\n' "$(( ($(date +%s) - $1 + 59) / 60 ))"; }
 complete_stage() {
@@ -179,7 +234,11 @@ wait_for_certificate() {
     progress "$started" 4 "$STEP_4" "$(dns_count "$BEGET_IP")"
     if curl -s -o /dev/null --max-time 10 --resolve "$FQDN:443:$BEGET_IP" "https://$FQDN/"; then
       complete_stage 4 "$STEP_4" "$started"
-      printf '🟢 МОЖНО ТЕСТИРОВАТЬ: откройте форму https://forms-test.arwox.ru/\n'
+      if [ "$FQDN" = forms.arwox.ru ]; then
+        printf '🟢 МОЖНО ТЕСТИРОВАТЬ 15 мин: откройте https://arwox.ru/#contact, отправьте заявку → должен открыться #sent\n'
+      else
+        printf '🟢 МОЖНО ТЕСТИРОВАТЬ: откройте форму https://forms-test.arwox.ru/\n'
+      fi
       return 0
     fi
     elapsed=$(( $(date +%s) - started ))
@@ -200,12 +259,14 @@ case ${1:-} in
     lock_demo
     guard_log_start=0
     [ -r "$GUARD_LOG" ] && guard_log_start=$(wc -l < "$GUARD_LOG")
+    backup_log_start=0
+    [ -r "$BACKUP_LOG" ] && backup_log_start=$(wc -l < "$BACKUP_LOG")
     snapshot_guard_errors
     record yc-get "command=yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json"
     if gateway=$(yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json); then rc=0; else rc=$?; fi
     record yc-get "rc=$rc"
     [ "$rc" = 0 ] || exit "$rc"
-    domain_id=$(jq -r '.attached_domains[] | select(.domain == "forms-test.arwox.ru") | .domain_id' <<< "$gateway" | tail -1)
+    domain_id=$(jq -r --arg fqdn "$FQDN" '.attached_domains[] | select(.domain == $fqdn) | .domain_id' <<< "$gateway" | tail -1)
     if [ -z "$domain_id" ] || [ "$domain_id" = null ]; then printf 'ℹ️ Сбой уже имитирован — сначала ./demo.sh restore\n'; exit 0; fi
     record yc-remove "command=yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id <domain-id>"
     if yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id "$domain_id"; then rc=0; else rc=$?; fi
@@ -215,6 +276,7 @@ case ${1:-} in
     jq -cn --argjson started "$started" --arg at "$(date -u +%FT%TZ)" '{started:$started,at:$at}' > "$STATE"
     record state "saved=$STATE started=$started"
     complete_stage 1 "$STEP_1" "$started"
+    start_auto_restore
     wait_for_guard "$started"
     wait_for "$BEGET_IP" "$started" 3 "$STEP_3"
     wait_for_certificate "$started"
@@ -236,9 +298,11 @@ case ${1:-} in
     else
       printf '❌ Этап 5/5: заявка не принята резервом: HTTP %s Location=%s\n' "${code:-000}" "${location:-none}" >&2; exit 1
     fi
+    [ "$NO_FEED" = 1 ] || lead_feed "$(date +%s)"
     ;;
   restore)
     lock_demo
+    if [ "${DEMO_AUTO_RESTORE:-}" = 1 ]; then rm -f "$TIMER_PID"; else cancel_auto_restore; fi
     guard_log_start=0
     [ -r "$GUARD_LOG" ] && guard_log_start=$(wc -l < "$GUARD_LOG")
     snapshot_guard_errors
@@ -247,14 +311,14 @@ case ${1:-} in
     record yc-get "rc=$rc"
     [ "$rc" = 0 ] || exit "$rc"
     attached=0
-    if jq -e '.attached_domains[]? | select(.domain == "forms-test.arwox.ru")' >/dev/null <<< "$gateway"; then
+    if jq -e --arg fqdn "$FQDN" '.attached_domains[]? | select(.domain == $fqdn)' >/dev/null <<< "$gateway"; then
       attached=1
     else
       record yc-certificate-list "command=yc --profile default certificate-manager certificate list --format json"
       if certificates=$(yc --profile default certificate-manager certificate list --format json); then rc=0; else rc=$?; fi
       record yc-certificate-list "rc=$rc"
       [ "$rc" = 0 ] || exit "$rc"
-      certificate_id=$(jq -r '[.[] | select(.status == "ISSUED" and .domains == ["forms-test.arwox.ru"])] | last | .id // empty' <<< "$certificates")
+      certificate_id=$(jq -r --arg fqdn "$FQDN" '[.[] | select(.status == "ISSUED" and .domains == [$fqdn])] | last | .id // empty' <<< "$certificates")
       [ -n "$certificate_id" ] || { printf 'issued certificate not found\n' >&2; exit 1; }
       record yc-add "command=yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain $FQDN --certificate-id <certificate-id>"
       if yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain "$FQDN" --certificate-id "$certificate_id"; then rc=0; else rc=$?; fi
