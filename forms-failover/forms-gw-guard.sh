@@ -10,6 +10,7 @@ GUARD_GW_ID="${GUARD_GW_ID:-d5dn462s09a9dpofvl2d}"
 GUARD_FORMS_URL="${GUARD_FORMS_URL:-https://forms.arwox.ru/}"
 GUARD_FQDN="${GUARD_FORMS_URL#*://}"; GUARD_FQDN="${GUARD_FQDN%%/*}"
 GUARD_GW_HOST="${GUARD_GW_HOST:-}"; DNS_SWITCH="${DNS_SWITCH:-}"; NPM_HOST_ID="${NPM_HOST_ID:-}"; BEGET_IP="${BEGET_IP:-45.139.76.176}"
+NPM_SSL_REQUEST="${NPM_SSL_REQUEST:-/root/workspaces/tools/acc1-scripts/actions/npm_ssl_request.sh}"
 GUARD_BALANCE_MIN="${GUARD_BALANCE_MIN:-10}"
 GUARD_STATE_DIR="${GUARD_STATE_DIR:-/root/workspaces/tools/scripts/schedulers/state}"
 GUARD_DEBOUNCE_SEC="${GUARD_DEBOUNCE_SEC:-21600}"
@@ -199,13 +200,19 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
   if [ -n "$DNS_SWITCH" ]; then
     dns_result=$(bash "$DNS_SWITCH" apply "$target" --fqdn "$GUARD_FQDN" 2>&1); dns_rc=$?
     if [ "$dns_rc" != 0 ]; then
-      log "dns switch failed: ${dns_result%%$'\n'*}"
+      if [ "$target" = outage ] && ! jq -e '.dns_fail_snapshot == true' "$STATE_FILE" >/dev/null; then
+        snapshot=$(incident_snapshot)
+        jq '.dns_fail_snapshot=true' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+        log "dns switch failed: ${dns_result%%$'\n'*}; snapshot: $snapshot"
+      else
+        log "dns switch failed: ${dns_result%%$'\n'*}"
+      fi
       [ "$rc" = 0 ] && return 0
     fi
   fi
   result=${result%%$'\n'*}
   if [ "$rc" = 0 ]; then
-    jq --arg mode "$target" '.fallback_mode=$mode' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+    jq --arg mode "$target" '.fallback_mode=$mode | del(.dns_fail_snapshot)' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
     case "$target" in
       outage) snapshot=$(incident_snapshot); notify fallback_outage "$GUARD_FQDN: включён резервный канал формы. Снимок: $snapshot" ;;
       normal) notify fallback_normal "$GUARD_FQDN: восстановлен стандартный блок формы." ;;
@@ -299,10 +306,9 @@ if [ "$(jq -r '.fallback_mode // "normal"' <<<"$state")" = outage ] && [ -n "$NP
   if [ "$all" = 1 ] && ! curl -s -o /dev/null --max-time 10 --resolve "$GUARD_FQDN:443:127.0.0.1" "https://$GUARD_FQDN/"; then
     le_at=$(jq -r '.le_at // 0' <<<"$state"); now=$(date +%s)
     if [ $((now - le_at)) -ge 900 ]; then
-      /root/workspaces/tools/acc1-scripts/actions/npm_ssl_request.sh "{\"proxy_host_id\":\"$NPM_HOST_ID\"}" >/dev/null; rc=$?
+      "$NPM_SSL_REQUEST" "{\"proxy_host_id\":\"$NPM_HOST_ID\"}" >/dev/null; rc=$?
       log "ssl request rc=$rc"
       jq --argjson le_at "$now" '.le_at=$le_at' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
-      log le "rc=$rc"
     fi
   fi
 fi
