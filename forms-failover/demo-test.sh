@@ -9,7 +9,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 setup() {
   rm -rf "$TMP/run"
-  rm -f "$TMP/guard-written" "$TMP/error-written" "$TMP/timer-sleep" "$TMP/timer-release" "$TMP/dns-switch.args"
+  rm -f "$TMP/guard-written" "$TMP/error-written" "$TMP/feed-written" "$TMP/timer-sleep" "$TMP/timer-release" "$TMP/dns-switch.args"
   mkdir -p "$TMP/run/bin" "$TMP/run/state"
   cp "$DEMO" "$TMP/run/demo.sh"
   : > "$TMP/guard.out"
@@ -32,6 +32,11 @@ esac
 EOF
   cat > "$TMP/run/bin/flock" <<'EOF'
 #!/usr/bin/env bash
+[ "${LOCK_TEST:-}" = 1 ] || exit 0
+case "${1:-}" in
+  -n) [ ! -e "$DEMO_TMP/lock-held" ] || exit 75; : > "$DEMO_TMP/lock-held" ;;
+  -u) rm -f "$DEMO_TMP/lock-held" ;;
+esac
 exit 0
 EOF
   cat > "$TMP/run/bin/sleep" <<'EOF'
@@ -52,8 +57,14 @@ if [ "${DEMO_SELF_INTERRUPT:-}" = 1 ]; then kill -INT "$PPID"; exit 0; fi
 if [ "${DEMO_FEED:-}" = 1 ] && [ "${1:-}" = 2 ] && [ -n "${FEED_LOG_LINES:-}" ] && [ ! -e "$DEMO_TMP/feed-written" ]; then
   printf '%b' "$FEED_LOG_LINES" >> "$BACKUP_LOG"
   : > "$DEMO_TMP/feed-written"
+  if [ "${DEMO_RELEASE_TIMER_ON_FEED:-}" = 1 ]; then
+    : > "$DEMO_TMP/timer-release"
+    for _ in {1..30}; do grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$DEMO_TMP/dns-switch.args" && break; /bin/sleep 0.1; done
+  fi
 fi
-printf '%s\n' "$(( $(cat "$DEMO_TMP/clock") + ${1:-0} ))" > "$DEMO_TMP/clock"
+if [ "${DEMO_FEED_CLOCK:-}" != 1 ] || { [ "${DEMO_AUTO_RESTORE:-}" != 1 ] && [ "${1:-}" = 2 ]; } || { [ "${DEMO_AUTO_RESTORE:-}" = 1 ] && [ "${1:-}" != 2 ]; }; then
+  printf '%s\n' "$(( $(cat "$DEMO_TMP/clock") + ${1:-0} ))" > "$DEMO_TMP/clock"
+fi
 EOF
   cat > "$TMP/run/bin/yc" <<'EOF'
 #!/usr/bin/env bash
@@ -229,14 +240,33 @@ case17() { # stage-5 failure still leaves and runs the early auto-restore timer
 case18() { # feed reports two new reserve lead receipts without request data
   setup A
   : > "$TMP/backup.out"
-  lines=$'forms-backup lead 2026-10-09T12:00:00Z host=forms-test.arwox.ru code=302 result=sent\nforms-backup lead 2026-10-09T12:00:01Z host=forms-test.arwox.ru code=302 result=err:consent\n'
-  out=$(DEMO_FEED=1 AUTO_RESTORE_SEC=2 BACKUP_LOG="$TMP/backup.out" FEED_LOG_LINES="$lines" run_demo simulate 2>"$TMP/err"); rc=$?
+  lines=$'2026-10-09T15:00:00: forms-backup lead 2026-10-09T12:00:00Z host=forms-test.arwox.ru code=302 result=sent\n2026-10-09T15:00:01: forms-backup lead 2026-10-09T12:00:01Z host=forms-test.arwox.ru code=302 result=err:consent\n'
+  out=$(DEMO_FEED=1 DEMO_FEED_CLOCK=1 AUTO_RESTORE_SEC=2 BACKUP_LOG="$TMP/backup.out" FEED_LOG_LINES="$lines" run_demo simulate 2>"$TMP/err"); rc=$?
   [ "$rc" = 0 ] && grep -Fq 'Заявка №1' <<< "$out" && grep -Fq 'Заявка №2' <<< "$out" && grep -Fq '🏆 Резерв принял 2' <<< "$out"
+}
+case19() { # feed accepts the old log format without a pm2 prefix
+  setup A
+  : > "$TMP/backup.out"
+  lines=$'forms-backup lead 2026-10-09T12:00:00Z host=forms-test.arwox.ru code=302 result=sent\nforms-backup lead 2026-10-09T12:00:01Z host=forms-test.arwox.ru code=302 result=err:consent\n'
+  out=$(DEMO_FEED=1 DEMO_FEED_CLOCK=1 AUTO_RESTORE_SEC=2 BACKUP_LOG="$TMP/backup.out" FEED_LOG_LINES="$lines" run_demo simulate 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] && grep -Fq 'Заявка №1' <<< "$out" && grep -Fq 'Заявка №2' <<< "$out" && grep -Fq '🏆 Резерв принял 2' <<< "$out"
+}
+case20() { # timer restores during the feed after the simulate lock is released
+  setup A
+  : > "$TMP/backup.out"
+  lines=$'2026-10-09T15:00:00: forms-backup lead 2026-10-09T12:00:00Z host=forms-test.arwox.ru code=302 result=sent\n2026-10-09T15:00:01: forms-backup lead 2026-10-09T12:00:01Z host=forms-test.arwox.ru code=302 result=sent\n'
+  out=$(DEMO_FEED=1 DEMO_FEED_CLOCK=1 DEMO_RELEASE_TIMER_ON_FEED=1 LOCK_TEST=1 RUN_TIMER=1 AUTO_TIMER_HOLD=1 AUTO_RESTORE_SEC=2 BACKUP_LOG="$TMP/backup.out" FEED_LOG_LINES="$lines" run_demo simulate 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] && grep -Fq '🏆 Резерв принял 2' <<< "$out" || return 1
+  for _ in {1..30}; do
+    grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$TMP/dns-switch.args" && ! grep -Fq 'restore result rc=75' "$TMP/run/state/demo.log" && return 0
+    /bin/sleep 0.1
+  done
+  return 1
 }
 
 PASS=0
 FAIL=0
-for i in {1..18}; do
+for i in {1..20}; do
   if "case$i"; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); printf 'FAIL case %s\n' "$i"; fi
 done
-if [ "$FAIL" = 0 ]; then printf 'PASS %d/18\n' "$PASS"; else printf 'FAIL %d/18 (PASS %d/18)\n' "$FAIL" "$PASS"; exit 1; fi
+if [ "$FAIL" = 0 ]; then printf 'PASS %d/20\n' "$PASS"; else printf 'FAIL %d/20 (PASS %d/20)\n' "$FAIL" "$PASS"; exit 1; fi

@@ -84,6 +84,7 @@ cancel_auto_restore() {
   rm -f "$TIMER_PID"
 }
 start_auto_restore() {
+  auto_restore_started=$(date +%s)
   setsid nohup bash -c 'export DEMO_AUTO_RESTORE=1; sleep "$1"; FORMS_FQDN="$2" "$3/demo.sh" restore' _ "${AUTO_RESTORE_SEC:-900}" "$FQDN" "$DIR" </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$TIMER_PID"
   printf '⏱ Автовозврат на Яндекс через 15 мин\n'
@@ -96,7 +97,11 @@ lead_feed() {
     if [ -r "$BACKUP_LOG" ]; then
       line_count=$(wc -l < "$BACKUP_LOG")
       if [ "$line_count" -lt "$seen" ]; then seen=0; fi
-      while read -r _ _ at host code result; do
+      while IFS= read -r line; do
+        case "$line" in
+          *"forms-backup lead "*) read -r at host code result <<< "${line#*forms-backup lead }" ;;
+          *) continue ;;
+        esac
         [ "$host" = "host=$FQDN" ] || continue
         clock=${at#*T}; clock=${clock%Z}
         case "$result" in
@@ -298,7 +303,7 @@ case ${1:-} in
     else
       printf '❌ Этап 5/5: заявка не принята резервом: HTTP %s Location=%s\n' "${code:-000}" "${location:-none}" >&2; exit 1
     fi
-    [ "$NO_FEED" = 1 ] || lead_feed "$(date +%s)"
+    [ "$NO_FEED" = 1 ] || { flock -u 9; exec 9>&-; lead_feed "$auto_restore_started"; }
     ;;
   restore)
     lock_demo
