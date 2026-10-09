@@ -1,0 +1,23 @@
+# Проверка переключения формы
+
+Проверяем тестовый адрес: при недоступности шлюза Яндекса DNS переводит его на
+резервный сервер, после восстановления возвращает обратно. Боевой
+`forms.arwox.ru` эти скрипты не трогают.
+
+Команды по порядку:
+
+```bash
+bash /root/workspaces/projects/arwox-v3-src/forms-failover/demo.sh status
+bash /root/workspaces/projects/arwox-v3-src/forms-failover/demo.sh simulate
+# Откройте https://forms-test.arwox.ru в браузере и убедитесь, что показана форма.
+bash /root/workspaces/projects/arwox-v3-src/forms-failover/demo.sh restore
+```
+
+`1)` домен отключён от шлюза Яндекса.
+`2)` все шесть DNS Beget подтвердили резервный сервер.
+`3)` тестовая заявка дошла до резервного обработчика; показана капча.
+`4)` все шесть DNS Beget подтвердили возврат на шлюз Яндекса.
+
+Время в строках — UTC. Ожидание переключения или возврата — до 15 минут.
+Подробный журнал команды: `forms-failover/state/demo.log`.
+Лог наблюдателя: `/root/.pm2/logs/forms-gw-guard-test-out.log`.
