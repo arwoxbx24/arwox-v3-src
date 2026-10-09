@@ -29,3 +29,12 @@
 1. `grep -c -E "^@" CLAUDE.md` → 1.
 2. `grep -c -E "code-channel|ship-post|repowise|csb|ПРИНЦИПЫ|projects/AGENTS.md" AGENTS.md` → 0.
 3. `wc -c` CLAUDE.md + AGENTS.md < 1030 + 5957.
+
+## U3 — ТЗ v3: инструкция владельца дословно (dcfg-3v3z1)
+Причина: слово владельца 09.10 — инструкции текущей директории; «строго следовать моим требованиям, а также инструкция» + вставленный текст.
+Решение: текст владельца дословно разделом в начале `AGENTS.md`; Claude получает его через `@AGENTS.md`, Codex — нативно.
+
+Критерии:
+1. `grep -c -F "Never claim completion" AGENTS.md` → 1.
+2. `grep -c -F "A clear stopping condition" AGENTS.md` → 1.
+3. `grep -c -E "^@AGENTS.md$" CLAUDE.md` → 1.
