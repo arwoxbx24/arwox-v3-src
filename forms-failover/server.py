@@ -8,6 +8,7 @@ sys.path.insert(0, os.environ.get(
     "FORMS_HANDLER_DIR",
     "/root/workspaces/projects/arwox-v3-src/site78-releases/2026-07-29/backend-arwox-lead-form",
 ))
+os.environ.setdefault("LEAD_FAILOVER_NOTE", "Форма была отправлена во время сбоя при резервном переключении")
 import index
 
 

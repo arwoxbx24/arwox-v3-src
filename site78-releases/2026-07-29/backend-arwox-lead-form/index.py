@@ -229,6 +229,9 @@ def handler(event, context):
     marker = get("COMMENTS")
     if get("CONSENT_MAILING"):
         marker = (marker + " | " if marker else "") + "Согласие на рассылку: ДА"
+    failover_note = os.environ.get("LEAD_FAILOVER_NOTE")
+    if failover_note:
+        marker = f"{failover_note}\n{marker}" if marker else failover_note
 
     # --- Скрытая атрибуция (сквозная аналитика), невидима пользователю ---
     form_content = get("UTM_CONTENT")  # метка формы + драйвер редиректа

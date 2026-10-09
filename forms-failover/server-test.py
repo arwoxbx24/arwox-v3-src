@@ -54,3 +54,36 @@ with tempfile.TemporaryDirectory() as temp:
     finally:
         process.terminate()
         process.wait()
+
+
+NOTE = "Форма была отправлена во время сбоя при резервном переключении"
+os.environ["FORMS_HANDLER_DIR"] = str(ROOT.parent / "site78-releases/2026-07-29/backend-arwox-lead-form")
+os.environ["WEBHOOK_URL"] = "https://example.invalid/rest/1/x"
+os.environ.pop("LEAD_FAILOVER_NOTE", None)
+import server  # noqa: E402
+
+calls = {}
+
+
+def fake_call(method, fields, **_):
+    calls[method] = fields
+    return {"result": 42}
+
+
+server.index.call_b24 = fake_call
+
+
+def submit():
+    calls.clear()
+    server.index.handler({
+        "httpMethod": "POST",
+        "body": "NAME=Ivan&PHONE=%2B79001112233&CONSENT=1&COMMENTS=%D0%9C%D0%B0%D1%80%D0%BA%D0%B5%D1%80+%D1%84%D0%BE%D1%80%D0%BC%D1%8B",
+        "isBase64Encoded": False,
+    }, None)
+    return calls["crm.lead.add"]["fields[COMMENTS]"]
+
+
+assert submit() == f"{NOTE}\nМаркер формы"
+os.environ.pop("LEAD_FAILOVER_NOTE", None)
+assert submit() == "Маркер формы"
+print("PASS 5/5")
