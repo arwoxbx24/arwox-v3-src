@@ -42,11 +42,11 @@ for arg in "$@"; do
   if [ "$prev" = "--data-binary" ]; then body="${arg#@}"; prev=""; continue; fi
   if [ "$prev" = "-o" ]; then out_file="$arg"; prev=""; continue; fi
   if [ "$prev" = "--resolve" ]; then use_resolve=1; prev=""; continue; fi
-  if [ "$prev" = "-w" ] || [ "$prev" = "--max-time" ] || [ "$prev" = "-H" ]; then prev=""; continue; fi
+  if [ "$prev" = "-w" ] || [ "$prev" = "-D" ] || [ "$prev" = "--max-time" ] || [ "$prev" = "-H" ]; then prev=""; continue; fi
   if [ "$prev" = "-K" ]; then [ "$arg" = "-" ] && use_k=1; prev=""; continue; fi
   case "$arg" in
     -s|-sS|-sI|-k|-I) ;;
-    -o|-w|--max-time|-H|-K|-X|--data-binary|--resolve) prev="$arg" ;;
+    -o|-w|-D|--max-time|-H|-K|-X|--data-binary|--resolve) prev="$arg" ;;
     *) [ -z "$url" ] && url="$arg" ;;
   esac
 done
@@ -115,7 +115,7 @@ case "$url" in
   *billingAccounts*)
     printf '{"billingAccounts":[{"active":true,"balance":"%s"}]}\n' "$(cat "$GUARD_TEST_TMP/balance")"
     ;;
-  https://*/)
+  http://*/)
     if [ -n "$use_resolve" ]; then
       cat "$GUARD_TEST_TMP/precheck.hdr"
     else
@@ -433,7 +433,9 @@ case18() { # refusal keeps DNS intact; switch and restore use one snapshot
   printf 'HTTP/2 302\nlocation: https://arwox.ru/#contact\n' > "$GUARD_TEST_TMP/precheck.hdr"
   out=$(dns_run apply outage); rc=$?
   [ "$out" = 'switched normal→outage' ] && [ "$rc" = 0 ] && \
-    [ "$(wc -l < "$GUARD_TEST_TMP/changeRecords.log")" = 1 ] && grep -q '"A".*203.0.113.10' "$GUARD_TEST_TMP/changeRecords.log" || return 1
+    [ "$(wc -l < "$GUARD_TEST_TMP/changeRecords.log")" = 1 ] && grep -q '"A".*203.0.113.10' "$GUARD_TEST_TMP/changeRecords.log" && \
+    grep -Fxq -- '-D' "$GUARD_TEST_TMP/curl.argv.log" && grep -Fxq -- 'forms.arwox.ru:80:203.0.113.10' "$GUARD_TEST_TMP/curl.argv.log" && \
+    grep -Fxq -- 'http://forms.arwox.ru/' "$GUARD_TEST_TMP/curl.argv.log" || return 1
   out=$(dns_run apply outage); [ "$out" = 'noop outage' ] || return 1
   [ "$(wc -l < "$GUARD_TEST_TMP/changeRecords.log")" = 1 ] || return 1
   out=$(dns_run apply normal); rc=$?

@@ -68,7 +68,7 @@ if [ "$current" = "$target" ]; then printf 'noop %s\n' "$target"; exit 0; fi
 [ "$target" != outage ] || [ -n "$BEGET_IP" ] || { notify refused "forms DNS no BEGET_IP"; printf 'refused precheck no BEGET_IP\n'; exit 3; }
 [ -e "$SNAPSHOT" ] || printf '%s\n' "$DNS_DATA" > "$SNAPSHOT"
 if [ "$target" = outage ]; then
-  header=$(curl -sI --max-time 10 --resolve "$DNS_FQDN:443:$BEGET_IP" "https://$DNS_FQDN/" || true)
+  header=$(curl -s -o /dev/null -D - --max-time 10 --resolve "$DNS_FQDN:80:$BEGET_IP" "http://$DNS_FQDN/" || true)
   code=$(awk 'NR == 1 { print $2; exit }' <<< "$header")
   if [ "$code" != 302 ] || ! grep -qi '^location:[[:space:]]*https://arwox.ru/#contact[[:space:]]*$' <<< "$header"; then notify refused "forms DNS precheck: ${code:-NET}"; printf 'refused precheck %s\n' "${code:-NET}"; exit 3; fi
   records=$(jq -cn --arg ip "$BEGET_IP" '{A:[{priority:10,value:$ip}]}')
