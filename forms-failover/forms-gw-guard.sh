@@ -21,8 +21,10 @@ STATE_FILE="$GUARD_STATE_DIR/state.json"
 BODY_FILE="$GUARD_STATE_DIR/forms-gw-guard.body"
 failed=0
 form_error=0
+dns_empty=0
 
 log() { printf '%s %s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%S')" "$1" "${2:-}" ; }
+state_write() { cat > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"; }
 
 outage_duration() { # seconds
   local seconds="$1" hours minutes
@@ -56,7 +58,7 @@ notify() { # type text
       if [ "$started" = 0 ]; then
         started="$now"
         state=$(echo "$state" | jq --argjson n "$now" '.form_outage_started_at = $n')
-        printf '%s\n' "$state" > "$STATE_FILE"
+        printf '%s\n' "$state" | state_write
       fi
       elapsed=$((now - started))
       case "$type" in
@@ -97,12 +99,12 @@ notify() { # type text
      printf '%s' "$out" | jq -e '.ok == true' >/dev/null 2>&1; then
     case "$type" in
       form_error|gw_failed)
-        echo "$state" | jq --arg t "$type" --argjson n "$now" '.form_outage_notified_at = $n | .[$t] = $n' > "$STATE_FILE"
+        echo "$state" | jq --arg t "$type" --argjson n "$now" '.form_outage_notified_at = $n | .[$t] = $n' | state_write
         ;;
       form_recovered)
-        echo "$state" | jq 'del(.form_outage_started_at, .form_outage_notified_at)' > "$STATE_FILE"
+        echo "$state" | jq 'del(.form_outage_started_at, .form_outage_notified_at)' | state_write
         ;;
-      *) echo "$state" | jq --arg t "$type" --argjson n "$now" '.[$t] = $n' > "$STATE_FILE" ;;
+      *) echo "$state" | jq --arg t "$type" --argjson n "$now" '.[$t] = $n' | state_write ;;
     esac
     log "sent $type"
   else
@@ -115,7 +117,7 @@ check_form() { # sets code, ssl, stopped
   local -a resolve=()
   if [ -n "$GUARD_GW_HOST" ]; then
     ip=$(dig +short "$GUARD_GW_HOST" | tail -1)
-    [ -n "$ip" ] || { code=000; ssl=0; total=0; stopped=0; log "check code=$code ssl=$ssl stopped=$stopped"; return; }
+    [ -n "$ip" ] || { dns_empty=1; log "check skip dns-empty"; return; }
     resolve=(--resolve "$GUARD_FQDN:443:$ip")
   fi
   out=$(curl -s --max-time 30 -o "$BODY_FILE" -w '%{http_code} %{ssl_verify_result} %{time_total}' "${resolve[@]}" "$GUARD_FORMS_URL" 2>/dev/null); rc=$?
@@ -182,16 +184,16 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
     failed)
       failures=$((failures + 1)); successes=0; target=outage
       state=$(echo "$state" | jq --argjson f "$failures" --argjson s "$successes" '.fallback_failures=$f | .fallback_successes=$s')
-      [ "$failures" -ge 2 ] && [ "$mode" != outage ] || { printf '%s\n' "$state" > "$STATE_FILE"; return 0; }
+      [ "$failures" -ge 2 ] && [ "$mode" != outage ] || { printf '%s\n' "$state" | state_write; return 0; }
       ;;
     success)
       successes=$((successes + 1)); failures=0; target=normal
       state=$(echo "$state" | jq --argjson f "$failures" --argjson s "$successes" '.fallback_failures=$f | .fallback_successes=$s')
-      [ "$mode" = outage ] && [ "$successes" -ge 2 ] || { printf '%s\n' "$state" > "$STATE_FILE"; return 0; }
+      [ "$mode" = outage ] && [ "$successes" -ge 2 ] || { printf '%s\n' "$state" | state_write; return 0; }
       ;;
     *) return 0 ;;
   esac
-  printf '%s\n' "$state" > "$STATE_FILE"
+  printf '%s\n' "$state" | state_write
   rc=0
   result=
   if [ -n "${FALLBACK_PAGE_ID:-}" ] && [ -n "${FALLBACK_BLOCK_ID:-}" ]; then
@@ -248,6 +250,7 @@ if ! flock -n 9; then
 fi
 
 check_form
+[ "$dns_empty" = 1 ] && exit 0
 if [ "$stopped" = 1 ]; then
   if out=$(yc serverless api-gateway get "$GUARD_GW_ID" --format json 2>&1); then
     status=$(printf '%s' "$out" | jq -r .status 2>/dev/null)
@@ -256,6 +259,7 @@ if [ "$stopped" = 1 ]; then
         log "resume issued"
         sleep 5
         check_form
+        [ "$dns_empty" = 1 ] && exit 0
         if [ "$stopped" = 0 ]; then
           log "resume ok"
           notify gw_resumed "$code"

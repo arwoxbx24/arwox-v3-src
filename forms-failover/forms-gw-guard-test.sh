@@ -161,7 +161,7 @@ cat > "$tmp/bin/dig" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   *@ns*.beget.*) printf '203.0.113.10\n' ;;
-  *) printf '203.0.113.9\n' ;;
+  *) [ -e "$GUARD_TEST_TMP/dig.empty" ] || printf '203.0.113.9\n' ;;
 esac
 EOF
 chmod +x "$tmp/bin/curl" "$tmp/bin/yc" "$tmp/bin/dig"
@@ -598,13 +598,55 @@ case30() { # foreign redirect does not request HTTPS
     ! grep -Fxq -- 'https://forms.arwox.ru/' "$GUARD_TEST_TMP/curl.argv.log"
 }
 
-for i in {1..30}; do
+case31() { # empty gateway DNS skips two checks without failover
+  export GUARD_TEST_TMP="$tmp"
+  fallback_setup
+  export GUARD_GW_HOST=gw.test
+  export DNS_SWITCH="$tmp/dns-switch-stub.sh"
+  printf '#!/usr/bin/env bash\nprintf called > "$GUARD_TEST_TMP/dns-switch.called"\n' > "$DNS_SWITCH"
+  chmod +x "$DNS_SWITCH"
+  touch "$tmp/dig.empty"
+  printf '{"fallback_mode":"normal","fallback_failures":0,"fallback_successes":0}\n' > "$GUARD_STATE_DIR/state.json"
+  out=$(bash "$GUARD" 2>&1); rc1=$?
+  out2=$(bash "$GUARD" 2>&1); rc2=$?
+  if ! [ -e "$tmp/dns-switch.called" ] && [ "$rc1" = 0 ] && [ "$rc2" = 0 ] && \
+    printf '%s\n%s' "$out" "$out2" | grep -c 'check skip dns-empty' | grep -qx 2 && \
+    jq -e '.fallback_mode == "normal" and .fallback_failures == 0 and .fallback_successes == 0' "$GUARD_STATE_DIR/state.json" >/dev/null; then
+    rm -f "$tmp/dig.empty"
+    unset GUARD_GW_HOST DNS_SWITCH
+    return 0
+  fi
+  rm -f "$tmp/dig.empty"
+  unset GUARD_GW_HOST DNS_SWITCH
+  return 1
+}
+
+case32() { # state writes leave valid JSON and no temporary file
+  fallback_setup
+  printf '5.1\n' > "$tmp/balance"
+  run_guard
+  ! [ -e "$GUARD_STATE_DIR/state.json.tmp" ] && jq -e . "$GUARD_STATE_DIR/state.json" >/dev/null
+}
+
+case33() { # TLS certificate request is rate-limited for outage
+  export GUARD_TEST_TMP="$tmp"
+  snapshot_setup
+  printf '{"fallback_mode":"outage"}\n' > "$GUARD_STATE_DIR/state.json"
+  export NPM_HOST_ID=40 BEGET_IP=203.0.113.10 NPM_SSL_REQUEST="$tmp/npm_ssl_request.sh"
+  printf '#!/usr/bin/env bash\nprintf "called\\n" >> "$GUARD_TEST_TMP/npm.calls"\nexit 1\n' > "$NPM_SSL_REQUEST"
+  chmod +x "$NPM_SSL_REQUEST"
+  rm -f "$tmp/npm.calls"
+  run_guard; run_guard
+  [ "$(wc -l < "$tmp/npm.calls")" = 1 ]
+}
+
+for i in {1..33}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/30\n' "$PASS"
+  printf 'PASS %d/33\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/30 (PASS %d/30)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/33 (PASS %d/33)\n' "$FAIL" "$PASS"
   exit 1
 fi
