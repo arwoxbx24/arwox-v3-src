@@ -21,7 +21,17 @@ else
   GUARD_LOG=${GUARD_LOG:-/root/.pm2/logs/forms-gw-guard-test-out.log}
   GUARD_ERR=${GUARD_ERR:-/root/.pm2/logs/forms-gw-guard-test-error.log}
 fi
+usage() { printf 'usage: %s status|simulate [--no-feed]|restore\n' "$0" >&2; exit 64; }
+
 COMMAND=${1:-}
+NO_FEED=0
+if [ "$COMMAND" = simulate ] && [ "${2:-}" = --no-feed ]; then NO_FEED=1; fi
+case "$COMMAND" in
+  status|restore) [ "$#" = 1 ] || usage ;;
+  simulate) { [ "$#" = 1 ] || { [ "$#" = 2 ] && [ "$2" = --no-feed ]; }; } || usage ;;
+  *) usage ;;
+esac
+BACKUP_LOG=${BACKUP_LOG:-/root/.pm2/logs/forms-backup-out.log}
 
 STEP_1='Сбой Яндекса имитирован'
 STEP_2='Сторож заметил сбой'
@@ -40,7 +50,6 @@ trap finish EXIT
 trap 'exit 130' INT TERM
 record start "fqdn=$FQDN"
 
-usage() { printf 'usage: %s status|simulate|restore\n' "$0" >&2; exit 64; }
 yandex_code() {
   local ip code=000 rc=0
   ip=$(dig +short "$GW" | tail -1)
@@ -78,6 +87,36 @@ start_auto_restore() {
   setsid nohup bash -c 'export DEMO_AUTO_RESTORE=1; sleep "$1"; FORMS_FQDN="$2" "$3/demo.sh" restore' _ "${AUTO_RESTORE_SEC:-900}" "$FQDN" "$DIR" </dev/null >/dev/null 2>&1 &
   printf '%s\n' "$!" > "$TIMER_PID"
   printf '⏱ Автовозврат на Яндекс через 15 мин\n'
+}
+lead_feed() {
+  local started=$1 line_count=0 seen=0 accepted=0 errors=0 now remaining at host code result clock
+  seen=${backup_log_start:-0}
+  trap 'printf "🏆 Резерв принял %s заявок (✅ %s, ❌ %s). В Bitrix24 у них комментарий «Форма была отправлена во время сбоя…»\n" "$((accepted + errors))" "$accepted" "$errors"; printf "⏱ Автовозврат на Яндекс сработает сам\n"; exit 130' INT TERM
+  while :; do
+    if [ -r "$BACKUP_LOG" ]; then
+      line_count=$(wc -l < "$BACKUP_LOG")
+      if [ "$line_count" -lt "$seen" ]; then seen=0; fi
+      while read -r _ _ at host code result; do
+        [ "$host" = "host=$FQDN" ] || continue
+        clock=${at#*T}; clock=${clock%Z}
+        case "$result" in
+          result=sent) accepted=$((accepted + 1)); printf '🎯 Заявка №%s принята РЕЗЕРВОМ %s в %s → ✅ #sent\n' "$((accepted + errors))" "$BEGET_IP" "$clock" ;;
+          result=err:*) errors=$((errors + 1)); printf '🎯 Заявка №%s принята РЕЗЕРВОМ %s в %s → ❌ %s\n' "$((accepted + errors))" "$BEGET_IP" "$clock" "${result#result=}" ;;
+        esac
+      done < <(sed -n "$((seen + 1)),$line_count p" "$BACKUP_LOG")
+      seen=$line_count
+    fi
+    now=$(date +%s)
+    remaining=$(( ${AUTO_RESTORE_SEC:-900} - (now - started) ))
+    [ "$remaining" -gt 0 ] || break
+    if [ $(((now - started) % 30)) = 0 ]; then
+      printf '⏳ Окно теста: осталось %02d:%02d | принято резервом: %s\n' "$((remaining / 60))" "$((remaining % 60))" "$((accepted + errors))"
+    fi
+    [ "$remaining" -lt 5 ] && sleep "$remaining" || sleep 5
+  done
+  trap 'exit 130' INT TERM
+  printf '🏆 Резерв принял %s заявок (✅ %s, ❌ %s). В Bitrix24 у них комментарий «Форма была отправлена во время сбоя…»\n' "$((accepted + errors))" "$accepted" "$errors"
+  printf '⏱ Автовозврат на Яндекс сработает сам\n'
 }
 elapsed_minutes() { printf '%s\n' "$(( ($(date +%s) - $1 + 59) / 60 ))"; }
 complete_stage() {
@@ -220,6 +259,8 @@ case ${1:-} in
     lock_demo
     guard_log_start=0
     [ -r "$GUARD_LOG" ] && guard_log_start=$(wc -l < "$GUARD_LOG")
+    backup_log_start=0
+    [ -r "$BACKUP_LOG" ] && backup_log_start=$(wc -l < "$BACKUP_LOG")
     snapshot_guard_errors
     record yc-get "command=yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json"
     if gateway=$(yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json); then rc=0; else rc=$?; fi
@@ -235,6 +276,7 @@ case ${1:-} in
     jq -cn --argjson started "$started" --arg at "$(date -u +%FT%TZ)" '{started:$started,at:$at}' > "$STATE"
     record state "saved=$STATE started=$started"
     complete_stage 1 "$STEP_1" "$started"
+    start_auto_restore
     wait_for_guard "$started"
     wait_for "$BEGET_IP" "$started" 3 "$STEP_3"
     wait_for_certificate "$started"
@@ -256,7 +298,7 @@ case ${1:-} in
     else
       printf '❌ Этап 5/5: заявка не принята резервом: HTTP %s Location=%s\n' "${code:-000}" "${location:-none}" >&2; exit 1
     fi
-    start_auto_restore
+    [ "$NO_FEED" = 1 ] || lead_feed "$(date +%s)"
     ;;
   restore)
     lock_demo

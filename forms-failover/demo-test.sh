@@ -9,11 +9,12 @@ trap 'rm -rf "$TMP"' EXIT
 
 setup() {
   rm -rf "$TMP/run"
-  rm -f "$TMP/guard-written" "$TMP/error-written"
+  rm -f "$TMP/guard-written" "$TMP/error-written" "$TMP/timer-sleep" "$TMP/timer-release" "$TMP/dns-switch.args"
   mkdir -p "$TMP/run/bin" "$TMP/run/state"
   cp "$DEMO" "$TMP/run/demo.sh"
   : > "$TMP/guard.out"
   : > "$TMP/guard.err"
+  : > "$TMP/dns-switch.args"
   printf '100000\n' > "$TMP/clock"
   printf '%s\n' "${1:-A}" > "$TMP/dns-mode"
   printf '0\n' > "$TMP/cert-failures"
@@ -35,7 +36,10 @@ exit 0
 EOF
   cat > "$TMP/run/bin/sleep" <<'EOF'
 #!/usr/bin/env bash
-if [ "${DEMO_AUTO_RESTORE:-}" = 1 ] && [ "${AUTO_TIMER_HOLD:-}" = 1 ]; then : > "$DEMO_TMP/timer-sleep"; exec /bin/sleep 30; fi
+if [ "${DEMO_AUTO_RESTORE:-}" = 1 ] && [ "${AUTO_TIMER_HOLD:-}" = 1 ]; then
+  : > "$DEMO_TMP/timer-sleep"
+  while [ ! -e "$DEMO_TMP/timer-release" ]; do /bin/sleep 0.1; done
+fi
 if [ ! -e "$DEMO_TMP/guard-written" ]; then
   printf 'check code=000\n' >> "$GUARD_LOG"
   : > "$DEMO_TMP/guard-written"
@@ -45,6 +49,10 @@ if [ -n "${DEMO_WRITE_ERROR:-}" ] && [ ! -e "$DEMO_TMP/error-written" ]; then
   : > "$DEMO_TMP/error-written"
 fi
 if [ "${DEMO_SELF_INTERRUPT:-}" = 1 ]; then kill -INT "$PPID"; exit 0; fi
+if [ "${DEMO_FEED:-}" = 1 ] && [ "${1:-}" = 2 ] && [ -n "${FEED_LOG_LINES:-}" ] && [ ! -e "$DEMO_TMP/feed-written" ]; then
+  printf '%b' "$FEED_LOG_LINES" >> "$BACKUP_LOG"
+  : > "$DEMO_TMP/feed-written"
+fi
 printf '%s\n' "$(( $(cat "$DEMO_TMP/clock") + ${1:-0} ))" > "$DEMO_TMP/clock"
 EOF
   cat > "$TMP/run/bin/yc" <<'EOF'
@@ -104,8 +112,10 @@ EOF
 }
 
 run_demo() {
+  if [ "${1:-}" = simulate ] && [ "${DEMO_FEED:-}" != 1 ]; then set -- "$@" --no-feed; fi
   env PATH="$TMP/run/bin:$PATH" DEMO_TMP="$TMP" \
     GUARD_LOG="$TMP/guard.out" GUARD_ERR="$TMP/guard.err" \
+    BACKUP_LOG="${BACKUP_LOG:-}" FEED_LOG_LINES="${FEED_LOG_LINES:-}" AUTO_RESTORE_SEC="${AUTO_RESTORE_SEC:-}" \
     BEGET_IP=203.0.113.10 DNS_GW_CNAME=d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net \
     bash "$TMP/run/demo.sh" "$@"
 }
@@ -206,10 +216,27 @@ case16() { # manual restore kills a live timer and removes its PID file
   run_demo restore >"$TMP/out" 2>"$TMP/err" || return 1
   [ ! -e "$TMP/run/state/demo.timer.pid" ] && ! kill -0 "$pid" 2>/dev/null
 }
+case17() { # stage-5 failure still leaves and runs the early auto-restore timer
+  setup A
+  CURL_POST_CODE=500 RUN_TIMER=1 AUTO_TIMER_HOLD=1 AUTO_RESTORE_SEC=1 run_demo simulate >"$TMP/out" 2>"$TMP/err"; rc=$?
+  [ "$rc" -ne 0 ] || return 1
+  for _ in {1..30}; do [ -f "$TMP/run/state/demo.timer.pid" ] && break; /bin/sleep 0.1; done
+  [ -s "$TMP/run/state/demo.timer.pid" ] || return 1
+  : > "$TMP/timer-release"
+  for _ in {1..30}; do grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$TMP/dns-switch.args" && return 0; /bin/sleep 0.1; done
+  return 1
+}
+case18() { # feed reports two new reserve lead receipts without request data
+  setup A
+  : > "$TMP/backup.out"
+  lines=$'forms-backup lead 2026-10-09T12:00:00Z host=forms-test.arwox.ru code=302 result=sent\nforms-backup lead 2026-10-09T12:00:01Z host=forms-test.arwox.ru code=302 result=err:consent\n'
+  out=$(DEMO_FEED=1 AUTO_RESTORE_SEC=2 BACKUP_LOG="$TMP/backup.out" FEED_LOG_LINES="$lines" run_demo simulate 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] && grep -Fq 'Заявка №1' <<< "$out" && grep -Fq 'Заявка №2' <<< "$out" && grep -Fq '🏆 Резерв принял 2' <<< "$out"
+}
 
 PASS=0
 FAIL=0
-for i in {1..16}; do
+for i in {1..18}; do
   if "case$i"; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); printf 'FAIL case %s\n' "$i"; fi
 done
-if [ "$FAIL" = 0 ]; then printf 'PASS %d/16\n' "$PASS"; else printf 'FAIL %d/16 (PASS %d/16)\n' "$FAIL" "$PASS"; exit 1; fi
+if [ "$FAIL" = 0 ]; then printf 'PASS %d/18\n' "$PASS"; else printf 'FAIL %d/18 (PASS %d/18)\n' "$FAIL" "$PASS"; exit 1; fi

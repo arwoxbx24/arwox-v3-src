@@ -29,14 +29,14 @@ with tempfile.TemporaryDirectory() as temp:
         "import json\n"
         "def handler(event, _):\n"
         " if event['path'] == '/boom': raise RuntimeError()\n"
-        " return {'statusCode': 302, 'headers': {'Location': '/ok'}, 'body': json.dumps(event)}\n"
+        " return {'statusCode': 302, 'headers': {'Location': '/?ok=1#sent' if event['httpMethod'] == 'POST' else '/ok'}, 'body': json.dumps(event)}\n"
     )
     probe = socket.socket()
     probe.bind(("127.0.0.1", 0))
     port = probe.getsockname()[1]
     probe.close()
     env = os.environ | {"FORMS_HANDLER_DIR": temp, "FORMS_BACKUP_BIND": "127.0.0.1", "FORMS_BACKUP_PORT": str(port)}
-    process = subprocess.Popen([sys.executable, ROOT / "server.py"], env=env, stderr=subprocess.DEVNULL)
+    process = subprocess.Popen([sys.executable, ROOT / "server.py"], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
     try:
         for _ in range(20):
             try:
@@ -53,6 +53,9 @@ with tempfile.TemporaryDirectory() as temp:
         event = json.loads(body)
         assert status == 302 and "NAME=x" in event["body"]
         assert event["headers"]["X-Real-Remote-Address"] == "9.9.9.9"
+        lead_log = process.stdout.readline().strip()
+        assert "forms-backup lead " in lead_log and "code=302 result=sent" in lead_log
+        assert "NAME=x" not in lead_log and "PHONE=1" not in lead_log
         assert request(port, "GET", "/boom")[0] == 502
         print("PASS 3/3")
     finally:

@@ -67,6 +67,12 @@ class FormsBackupHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+        if self.command == "POST":
+            location = next((value for name, value in (response.get("headers") or {}).items() if name.lower() == "location"), "")
+            error = dict(parse_qsl(urlsplit(location).query)).get("err")
+            result = "sent" if "#sent" in location else f"err:{error}" if error else "other"
+            host = self.headers.get("Host", "").replace("\r", "").replace("\n", "")
+            print(f"forms-backup lead {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} host={host} code={response.get('statusCode', 200)} result={result}", flush=True)
 
     do_GET = _handle
     do_POST = _handle
