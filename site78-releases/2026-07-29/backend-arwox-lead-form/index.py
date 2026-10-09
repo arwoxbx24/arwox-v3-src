@@ -11,11 +11,15 @@ import html
 import json
 import os
 import re
+import secrets
+import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
+from threading import Lock
 
 import consent  # реестр доказуемого согласия (M9.4), тот же каталог
 
@@ -120,7 +124,7 @@ _FORM_LABELS = {
 }
 
 
-def call_b24(method, params, _retries=3, _backoff=2.0, as_json=False):
+def call_b24(method, params, _retries=3, _backoff=2.0, as_json=False, with_status=False):
     """POST в Bitrix24 REST через вебхук. Ретраи на сетевых и transient-ошибках.
     Возвращает распарсенный dict; на полном отказе — {} (никогда не бросает).
     as_json — для вложенных структур (PROVIDER_PARAMS); плоские вызовы остаются urlencode."""
@@ -130,6 +134,9 @@ def call_b24(method, params, _retries=3, _backoff=2.0, as_json=False):
     else:
         data = urllib.parse.urlencode(params, doseq=True).encode()
         headers = {}
+    def result(value, status):
+        return (value, status) if with_status else value
+
     url = f"{WEBHOOK}/{method}"
     for attempt in range(_retries):
         try:
@@ -138,18 +145,18 @@ def call_b24(method, params, _retries=3, _backoff=2.0, as_json=False):
                 parsed = json.loads(r.read())
             if parsed.get("error", "") in _TRANSIENT:
                 raise RuntimeError("bitrix transient")
-            return parsed
+            return result(parsed, "content:json" if parsed.get("error") else "success")
         except urllib.error.HTTPError as exc:
             if (exc.code == 429 or exc.code >= 500) and attempt < _retries - 1:
                 time.sleep(_backoff ** attempt)
                 continue
-            return {}
+            return result({}, f"{'transient' if exc.code == 429 or exc.code >= 500 else 'content'}:{exc.code}")
         except (urllib.error.URLError, RuntimeError, TimeoutError):
             if attempt < _retries - 1:
                 time.sleep(_backoff ** attempt)
                 continue
-            return {}
-    return {}
+            return result({}, "transient:network")
+    return result({}, "transient:network")
 
 
 def _redirect(fragment):
@@ -181,6 +188,153 @@ def _header(event, name):
         if k.lower() == name.lower():
             return (v or "").strip()
     return ""
+
+
+_SPOOL_LIMIT = 500
+_SPOOL_LOCK = Lock()
+
+
+def _lead_status(fields, ctx):
+    outcome = call_b24("crm.lead.add", fields, with_status=True)
+    if isinstance(outcome, tuple):
+        res, status = outcome
+    else:  # совместимо с существующими тестовыми заглушками call_b24
+        res, status = outcome, "success" if outcome.get("result") else "content:empty"
+    if status != "success" or not res.get("result"):
+        return status if status.startswith("transient") else "content:lead"
+
+    try:
+        ip = ctx.get("ip", "")
+        if ip:
+            form_content = ctx.get("form_content", "")
+            form_label = _FORM_LABELS.get(form_content, form_content or "Форма сайта")
+            contact = ctx.get("contact", "")
+            raw_fields = [
+                ("string", "FORM", "Форма", form_label),
+                ("string", "NAME", "Имя", ctx.get("name", "")),
+                ("phone", "PHONE", "Телефон", "" if "@" in contact else contact),
+                ("email", "EMAIL", "E-mail", contact if "@" in contact else ""),
+                ("string", "COMPANY", "Компания", ctx.get("company", "")),
+                ("string", "INDUSTRY", "Отрасль", ctx.get("industry", "")),
+                ("string", "TEAM_SIZE", "Размер команды", ctx.get("team_size", "")),
+                ("list", "TOOLS", "Инструменты", ", ".join(ctx.get("tools", []))),
+                ("string", "LAUNCH", "Запуск", ctx.get("launch", "")),
+                ("text", "COMMENTS", "Комментарий", ctx.get("comments", "")),
+                ("list", "CONSENT", "Даю согласие на обработку ПДн", "Да"),
+                ("list", "CONSENT_MAILING", "Согласие на рассылку",
+                 "Да" if ctx.get("consent_mailing") else ""),
+                ("string", "CONSENT_DOC", "Документ согласия", CONSENT_DOC_URL),
+            ]
+            ref_origin = ctx.get("ref_origin", "")
+            act = call_b24("crm.activity.add", {"fields": {
+                "OWNER_TYPE_ID": 1, "OWNER_ID": res["result"], "TYPE_ID": 6,
+                "PROVIDER_ID": "CRM_WEBFORM", "PROVIDER_TYPE_ID": "4",
+                "SUBJECT": f"Согласие ПДн получено — {form_label}",
+                "COMPLETED": "Y",
+                "RESPONSIBLE_ID": os.environ.get("ASSIGNED_BY_ID", "1"),
+                "DESCRIPTION": "", "DESCRIPTION_TYPE": "1",
+                "START_TIME": ctx.get("created_at", ""), "END_TIME": ctx.get("created_at", ""),
+                "PROVIDER_PARAMS": {
+                    "FIELDS": [{"type": t, "code": c, "caption": cap, "value": [v]}
+                               for t, c, cap, v in raw_fields if v],
+                    "FORM": {"IS_USED_USER_CONSENT": True,
+                             "AGREEMENTS": [CONSENT_AGREEMENT_ID],
+                             "IP": ip, "LINK": f"https://{ref_origin}/" if ref_origin else LANDING},
+                },
+            }}, as_json=True)
+            act_id = act.get("result") if isinstance(act.get("result"), int) else None
+            call_b24("userconsent.consent.add", {
+                "AGREEMENT_ID": CONSENT_AGREEMENT_ID, "IP": ip,
+                "URL": f"https://{ref_origin}" if ref_origin else LANDING,
+                "ORIGINATOR_ID": "crm/activity" if act_id else (contact or ctx.get("name", "")),
+                "ORIGIN_ID": str(act_id) if act_id else f"arwox-lead-form:{form_content or 'form'}",
+            })
+    except Exception:
+        pass  # ponytail: согласие best-effort, лид уже создан — ответ не рушим
+    return "success"
+
+
+def create_lead(fields, ctx):
+    return _lead_status(fields, ctx)
+
+
+def _spool_log(name, action, status):
+    print(f"lead-spool id={name} action={action} status={status}", file=sys.stderr)
+
+
+def _ensure_spool(spool_dir):
+    old_umask = os.umask(0o077)
+    try:
+        Path(spool_dir).mkdir(mode=0o700, parents=True, exist_ok=True)
+    finally:
+        os.umask(old_umask)
+    os.chmod(spool_dir, 0o700)
+
+
+def _write_spool(spool_dir, name, item):
+    _ensure_spool(spool_dir)
+    target = Path(spool_dir, name)
+    temporary = target.with_name(target.name + ".tmp")
+    old_umask = os.umask(0o077)
+    try:
+        with open(temporary, "x", encoding="utf-8") as f:
+            json.dump(item, f, ensure_ascii=False, separators=(",", ":"))
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, target)
+    finally:
+        os.umask(old_umask)
+
+
+def _enqueue_lead(spool_dir, fields, ctx):
+    with _SPOOL_LOCK:
+        _ensure_spool(spool_dir)
+        spool = Path(spool_dir)
+        if sum(1 for _ in spool.glob("*.json")) + sum(1 for _ in spool.glob("*.inflight")) >= _SPOOL_LIMIT:
+            return False
+        _write_spool(spool_dir, f"{secrets.token_hex(8)}.json", {
+            "fields": fields, "ctx": ctx, "attempts": 0, "created": time.time(),
+        })
+    return True
+
+
+def _move_failed(path, spool_dir, status):
+    failed = Path(spool_dir, "failed")
+    _ensure_spool(failed)
+    os.replace(path, failed / path.with_suffix(".json").name)
+    _spool_log(path.name, "failed", status)
+
+
+def drain_spool(spool_dir, now=None):
+    """Дослать очередь. Одна запись не останавливает обработку соседних."""
+    now = time.time() if now is None else now
+    _ensure_spool(spool_dir)
+    spool = Path(spool_dir)
+    for inflight in list(spool.glob("*.inflight")):
+        os.replace(inflight, inflight.with_suffix(".json"))
+    for queued in list(spool.glob("*.json")):
+        inflight = queued.with_suffix(".inflight")
+        try:
+            os.replace(queued, inflight)
+            item = json.loads(inflight.read_text(encoding="utf-8"))
+            if not isinstance(item, dict) or not isinstance(item.get("fields"), dict) or not isinstance(item.get("ctx"), dict):
+                raise ValueError("json")
+            if item.get("created", now) < now - 86400 or item.get("attempts", 0) >= 100:
+                _move_failed(inflight, spool_dir, "expired")
+                continue
+            status = create_lead(item["fields"], item["ctx"])
+            if status == "success":
+                inflight.unlink()
+                _spool_log(inflight.name, "sent", "success")
+            elif status.startswith("transient"):
+                item["attempts"] = item.get("attempts", 0) + 1
+                _write_spool(spool_dir, queued.name, item)
+                inflight.unlink()
+                _spool_log(queued.name, "retry", status)
+            else:
+                _move_failed(inflight, spool_dir, status)
+        except Exception:
+            if inflight.exists():
+                _move_failed(inflight, spool_dir, "invalid")
 
 
 def handler(event, context):
@@ -274,71 +428,27 @@ def handler(event, context):
     # Никаких выдуманных меток: источник несёт SOURCE_ID=WEB («Веб-сайт») + SOURCE_DESCRIPTION.
     # Метки трафика — только реальные с рекламных площадок (сейчас их нет), поэтому не пишем.
 
-    res = call_b24("crm.lead.add", fields)
-    if not res.get("result"):
-        # Лид не создан — не врём пользователю про успех.
+    request_context = consent.extract_request_context(event)
+    lead_context = {
+        "ip": request_context["ip"], "user_agent": request_context["user_agent"],
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+        "ref_origin": ref_origin, "form_content": form_content, "name": name, "contact": contact,
+        "company": company, "industry": industry, "team_size": get("TEAM_SIZE"), "tools": tools,
+        "launch": get("LAUNCH"), "comments": get("COMMENTS"),
+        "consent_mailing": bool(get("CONSENT_MAILING")),
+    }
+    status = create_lead(fields, lead_context)
+    if status.startswith("transient"):
+        spool_dir = os.environ.get("LEAD_SPOOL_DIR")
+        if spool_dir:
+            try:
+                if _enqueue_lead(spool_dir, fields, lead_context):
+                    frag = "?ok=1#psent" if form_content == "popup" else "?ok=1#sent"
+                    return _redirect(frag)
+            except Exception:
+                pass
         return _redirect("?err=server#contact")
-
-    # Согласие ПДн → дело формата штатной вебформы (PROVIDER_ID=CRM_WEBFORM: жирные
-    # структурные поля, как у нативных CRM-форм — рендер подтверждён пробой 26188)
-    # + запись в нативных «Согласиях пользователей» со ссылкой на это дело.
-    # FAIL-OPEN: сбой НИКОГДА не роняет лид/ответ; согласие не теряем — при провале дела
-    # пишем его со старой меткой формы. IP — доверенный (правый край XFF, нормализован).
-    try:
-        ip = consent.extract_request_context(event)["ip"]
-        if ip:  # без валидного IP метод отвергает — не дёргаем впустую
-            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-            form_url = f"https://{ref_origin}/" if ref_origin else LANDING
-            # Все поля всех форм (квиз/попап/чек-лист); пустые не показываем.
-            raw_fields = [
-                ("string", "FORM", "Форма", form_label),
-                ("string", "NAME", "Имя", name),
-                # e-mail в поле PHONE (футер) — показываем как E-mail, не как телефон
-                ("phone", "PHONE", "Телефон", "" if "@" in (contact or "") else contact),
-                ("email", "EMAIL", "E-mail", contact if "@" in (contact or "") else ""),
-                ("string", "COMPANY", "Компания", company),
-                ("string", "INDUSTRY", "Отрасль", industry),
-                ("string", "TEAM_SIZE", "Размер команды", get("TEAM_SIZE")),
-                ("list", "TOOLS", "Инструменты", ", ".join(tools)),
-                ("string", "LAUNCH", "Запуск", get("LAUNCH")),
-                ("text", "COMMENTS", "Комментарий", get("COMMENTS")),
-                ("list", "CONSENT", "Даю согласие на обработку ПДн", "Да"),
-                ("list", "CONSENT_MAILING", "Согласие на рассылку",
-                 "Да" if get("CONSENT_MAILING") else ""),
-                ("string", "CONSENT_DOC", "Документ согласия", CONSENT_DOC_URL),
-            ]
-            act = call_b24("crm.activity.add", {"fields": {
-                "OWNER_TYPE_ID": 1, "OWNER_ID": res["result"], "TYPE_ID": 6,
-                "PROVIDER_ID": "CRM_WEBFORM", "PROVIDER_TYPE_ID": "4",
-                "SUBJECT": f"Согласие ПДн получено — {form_label}",
-                "COMPLETED": "Y",
-                "RESPONSIBLE_ID": os.environ.get("ASSIGNED_BY_ID", "1"),
-                "DESCRIPTION": "", "DESCRIPTION_TYPE": "1",
-                "START_TIME": now, "END_TIME": now,
-                "PROVIDER_PARAMS": {
-                    "FIELDS": [{"type": t, "code": c, "caption": cap, "value": [v]}
-                               for t, c, cap, v in raw_fields if v],
-                    # IS_USED_USER_CONSENT+IP рендерят строки «Пользовательское
-                    # соглашение выведено: Да» и «Заполнено с IP-адреса» сами.
-                    "FORM": {"IS_USED_USER_CONSENT": True,
-                             "AGREEMENTS": [CONSENT_AGREEMENT_ID],
-                             "IP": ip, "LINK": form_url},
-                },
-            }}, as_json=True)
-            act_id = act.get("result") if isinstance(act.get("result"), int) else None
-            # Как штатная форма (crm/lib/webform/resultentity.php → Consent::addByContext):
-            # ORIGINATOR_ID = код провайдера 'crm/activity', ORIGIN_ID = id дела —
-            # UI матчит провайдера по ORIGINATOR_ID и рисует кликабельное «Дело CRM #N».
-            call_b24("userconsent.consent.add", {
-                "AGREEMENT_ID": CONSENT_AGREEMENT_ID,
-                "IP": ip,
-                "URL": (f"https://{ref_origin}" if ref_origin else LANDING),
-                "ORIGINATOR_ID": "crm/activity" if act_id else (contact or name or ""),
-                "ORIGIN_ID": str(act_id) if act_id else f"arwox-lead-form:{form_content or 'form'}",
-            })
-    except Exception:
-        pass  # ponytail: согласие best-effort, лид уже создан — ответ не рушим
-
-    # Успех только после реального создания лида. Попап → фикс-оверлей #psent (в экране).
+    if status != "success":
+        return _redirect("?err=server#contact")
     frag = "?ok=1#psent" if form_content == "popup" else "?ok=1#sent"
     return _redirect(frag)

@@ -1,6 +1,8 @@
 import base64
 import os
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlsplit
 
@@ -9,7 +11,23 @@ sys.path.insert(0, os.environ.get(
     "/root/workspaces/projects/arwox-v3-src/site78-releases/2026-07-29/backend-arwox-lead-form",
 ))
 os.environ.setdefault("LEAD_FAILOVER_NOTE", "Форма была отправлена во время сбоя при резервном переключении")
+os.environ.setdefault("LEAD_SPOOL_DIR", "/var/lib/forms-backup/spool")
 import index
+
+
+_LEAD_SPOOL_INTERVAL = 60
+
+
+def _drain_spool():
+    while True:
+        time.sleep(_LEAD_SPOOL_INTERVAL)
+        try:
+            index.drain_spool(os.environ["LEAD_SPOOL_DIR"])
+        except Exception:
+            print("forms-backup spool drain failed", file=sys.stderr)
+
+
+threading.Thread(target=_drain_spool, name="lead-spool", daemon=True).start()
 
 
 class FormsBackupHandler(BaseHTTPRequestHandler):
