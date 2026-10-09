@@ -142,8 +142,35 @@ form_err_code() { # notify form_error when code is 5xx or 000
   fi
 }
 
+incident_snapshot() {
+  local incidents dir ip oldest
+  local -a resolve=()
+  incidents="$GUARD_STATE_DIR/incidents"
+  dir="$incidents/$(date -u '+%Y%m%dT%H%M%SZ')"
+  mkdir -p "$dir" || true
+  if [ -n "$GUARD_GW_HOST" ]; then
+    ip=$(dig +short "$GUARD_GW_HOST" | tail -1)
+    [ -n "$ip" ] && resolve=(--resolve "$GUARD_FQDN:443:$ip")
+  fi
+  curl -sv --max-time 15 "${resolve[@]}" "$GUARD_FORMS_URL" > "$dir/curl.txt" 2>&1 || true
+  for ns in ns1.beget.pro ns2.beget.pro ns1.beget.ru ns2.beget.ru ns1.beget.com ns2.beget.com; do
+    dig +short "$GUARD_FQDN" "@$ns"
+  done > "$dir/dns.txt" 2>&1 || true
+  if [ -n "${GUARD_LOG_FILE:-}" ] && [ -r "$GUARD_LOG_FILE" ]; then
+    tail -n 50 "$GUARD_LOG_FILE" > "$dir/guard.txt" || true
+  else
+    printf 'no log\n' > "$dir/guard.txt" || true
+  fi
+  while [ "$(ls -1d "$incidents"/*/ 2>/dev/null | wc -l)" -gt 10 ]; do
+    oldest=$(ls -1d "$incidents"/*/ 2>/dev/null | sort | head -n 1)
+    [ -n "$oldest" ] || break
+    rm -rf "$oldest" || true
+  done
+  printf '%s\n' "$dir"
+}
+
 fallback_track() { # failed|success; switch only after two consecutive outcomes
-  local outcome="$1" state failures successes mode target result rc dns_result dns_rc
+  local outcome="$1" state failures successes mode target result rc dns_result dns_rc snapshot
   [ -n "${FALLBACK_PAGE_ID:-}" ] && [ -n "${FALLBACK_BLOCK_ID:-}" ] || [ -n "$DNS_SWITCH" ] || return 0
   state="{}"
   if [ -f "$STATE_FILE" ] && state=$(cat "$STATE_FILE" 2>/dev/null) && echo "$state" | jq -e . >/dev/null 2>&1; then :; else state="{}"; fi
@@ -176,7 +203,7 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
   if [ "$rc" = 0 ]; then
     jq --arg mode "$target" '.fallback_mode=$mode' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
     case "$target" in
-      outage) notify fallback_outage "$GUARD_FQDN: включён резервный канал формы." ;;
+      outage) snapshot=$(incident_snapshot); notify fallback_outage "$GUARD_FQDN: включён резервный канал формы. Снимок: $snapshot" ;;
       normal) notify fallback_normal "$GUARD_FQDN: восстановлен стандартный блок формы." ;;
     esac
   else
