@@ -4,6 +4,7 @@ set -euo pipefail
 DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 GW=${DNS_GW_CNAME:-d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net}
 BEGET_IP=${BEGET_IP:-45.139.76.176}
+export BEGET_IP
 case "${FORMS_FQDN:-forms-test.arwox.ru}" in
   forms-test.arwox.ru) FQDN=forms-test.arwox.ru ;;
   forms.arwox.ru) printf 'refused: production FQDN\n' >&2; exit 2 ;;
@@ -14,6 +15,7 @@ STATE="$DIR/state/demo.json"
 LOG="$DIR/state/demo.log"
 LOCK="$DIR/state/demo.lock"
 GUARD_LOG=${GUARD_LOG:-/root/.pm2/logs/forms-gw-guard-test-out.log}
+GUARD_ERR=${GUARD_ERR:-/root/.pm2/logs/forms-gw-guard-test-error.log}
 COMMAND=${1:-}
 
 STEP_1='Сбой Яндекса имитирован'
@@ -30,6 +32,7 @@ finish() {
   record result "rc=$rc"
 }
 trap finish EXIT
+trap 'exit 130' INT TERM
 record start "fqdn=$FQDN"
 
 usage() { printf 'usage: %s status|simulate|restore\n' "$0" >&2; exit 64; }
@@ -69,6 +72,23 @@ complete_stage() {
 guard_lines() {
   [ -r "$GUARD_LOG" ] && tail -n "+$((guard_log_start + 1))" "$GUARD_LOG" || true
 }
+guard_error_lines() {
+  [ -r "$GUARD_ERR" ] && tail -n "+$((guard_err_start + 1))" "$GUARD_ERR" || true
+}
+guard_crashed() {
+  local stage=$1 line
+  while IFS= read -r line; do
+    if [[ "$line" == *'unbound variable'* || "$line" =~ line\ [0-9]+: ]]; then
+      printf '❌ Этап %s/5: сторож упал: %s\n' "$stage" "$line" >&2
+      return 0
+    fi
+  done < <(guard_error_lines)
+  return 1
+}
+snapshot_guard_errors() {
+  guard_err_start=0
+  [ -r "$GUARD_ERR" ] && guard_err_start=$(wc -l < "$GUARD_ERR")
+}
 guard_event() {
   local line event='ожидание события'
   while IFS= read -r line; do
@@ -91,8 +111,11 @@ guard_dns_failure() {
   printf '%s\n' "$failure"
 }
 progress() {
-  local started=$1 stage=$2 label=$3 dns=$4
-  printf '[+%s мин] Этап %s/5: %s ⏳ | DNS %s/6 | сторож: %s\n' "$(elapsed_minutes "$started")" "$stage" "$label" "$dns" "$(guard_event)"
+  local started=$1 stage=$2 label=$3 dns=$4 line
+  line="Этап $stage/5: $label ⏳ | DNS $dns/6 | сторож: $(guard_event)"
+  [ "${last_progress:-}" = "$line" ] && return
+  last_progress=$line
+  printf '[+%s мин] %s\n' "$(elapsed_minutes "$started")" "$line"
 }
 dns_count() {
   local wanted=$1 ns value count=0
@@ -104,9 +127,10 @@ dns_count() {
   printf '%s\n' "$count"
 }
 wait_for() {
-  local wanted=$1 started=$2 stage=${3:-} label=${4:-} elapsed ns value all details count failure
+  local wanted=$1 started=$2 stage=${3:-} label=${4:-} timeout=${5:-1200} elapsed ns value all details count failure
   local -a names=(ns1.beget.pro ns2.beget.pro ns1.beget.ru ns2.beget.ru ns1.beget.com ns2.beget.com)
   while :; do
+    guard_crashed "${stage:-4}" && return 1
     all=1; count=0
     details="expected=$wanted"
     for ns in "${names[@]}"; do
@@ -124,10 +148,10 @@ wait_for() {
       return 0
     fi
     elapsed=$(( $(date +%s) - started ))
-    if [ "$elapsed" -ge 1200 ]; then
+    if [ "$elapsed" -ge "$timeout" ]; then
       record wait "timeout=1 elapsed=$elapsed"
       if [ -n "$stage" ]; then printf '❌ Этап %s/5: ожидание превысило 20 мин\n' "$stage" >&2; else printf 'timeout: expected %s across all Beget NS\n' "$wanted" >&2; fi
-      return 1
+      return 124
     fi
     sleep 15
   done
@@ -135,6 +159,7 @@ wait_for() {
 wait_for_guard() {
   local started=$1 elapsed failure lines
   while :; do
+    guard_crashed 2 && return 1
     failure=$(guard_dns_failure)
     if [ -n "$failure" ]; then printf '❌ Этап 3/5: переключение DNS отклонено: %s\n' "$failure" >&2; return 1; fi
     progress "$started" 2 "$STEP_2" "$(dns_count "$BEGET_IP")"
@@ -148,10 +173,15 @@ wait_for_guard() {
 wait_for_certificate() {
   local started=$1 elapsed failure
   while :; do
+    guard_crashed 4 && return 1
     failure=$(guard_dns_failure)
     if [ -n "$failure" ]; then printf '❌ Этап 3/5: переключение DNS отклонено: %s\n' "$failure" >&2; return 1; fi
     progress "$started" 4 "$STEP_4" "$(dns_count "$BEGET_IP")"
-    if curl -s -o /dev/null --max-time 10 --resolve "$FQDN:443:$BEGET_IP" "https://$FQDN/"; then complete_stage 4 "$STEP_4" "$started"; return 0; fi
+    if curl -s -o /dev/null --max-time 10 --resolve "$FQDN:443:$BEGET_IP" "https://$FQDN/"; then
+      complete_stage 4 "$STEP_4" "$started"
+      printf '🟢 МОЖНО ТЕСТИРОВАТЬ: откройте форму https://forms-test.arwox.ru/\n'
+      return 0
+    fi
     elapsed=$(( $(date +%s) - started ))
     [ "$elapsed" -lt 1200 ] || { printf '❌ Этап 4/5: сертификат не готов за 20 мин\n' >&2; return 1; }
     sleep 15
@@ -170,6 +200,7 @@ case ${1:-} in
     lock_demo
     guard_log_start=0
     [ -r "$GUARD_LOG" ] && guard_log_start=$(wc -l < "$GUARD_LOG")
+    snapshot_guard_errors
     record yc-get "command=yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json"
     if gateway=$(yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json); then rc=0; else rc=$?; fi
     record yc-get "rc=$rc"
@@ -203,26 +234,42 @@ case ${1:-} in
     ;;
   restore)
     lock_demo
+    guard_log_start=0
+    [ -r "$GUARD_LOG" ] && guard_log_start=$(wc -l < "$GUARD_LOG")
+    snapshot_guard_errors
     record yc-get "command=yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json"
     if gateway=$(yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json); then rc=0; else rc=$?; fi
     record yc-get "rc=$rc"
     [ "$rc" = 0 ] || exit "$rc"
-    if jq -e '.attached_domains[]? | select(.domain == "forms-test.arwox.ru")' >/dev/null <<< "$gateway"; then printf '✅ Уже восстановлено\n'; exit 0; fi
-    record yc-certificate-list "command=yc --profile default certificate-manager certificate list --format json"
-    if certificates=$(yc --profile default certificate-manager certificate list --format json); then rc=0; else rc=$?; fi
-    record yc-certificate-list "rc=$rc"
-    [ "$rc" = 0 ] || exit "$rc"
-    certificate_id=$(jq -r '[.[] | select(.status == "ISSUED" and .domains == ["forms-test.arwox.ru"])] | last | .id // empty' <<< "$certificates")
-    [ -n "$certificate_id" ] || { printf 'issued certificate not found\n' >&2; exit 1; }
-    record yc-add "command=yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain $FQDN --certificate-id <certificate-id>"
-    if yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain "$FQDN" --certificate-id "$certificate_id"; then rc=0; else rc=$?; fi
-    record yc-add "rc=$rc"
-    [ "$rc" = 0 ] || exit "$rc"
+    attached=0
+    if jq -e '.attached_domains[]? | select(.domain == "forms-test.arwox.ru")' >/dev/null <<< "$gateway"; then
+      attached=1
+    else
+      record yc-certificate-list "command=yc --profile default certificate-manager certificate list --format json"
+      if certificates=$(yc --profile default certificate-manager certificate list --format json); then rc=0; else rc=$?; fi
+      record yc-certificate-list "rc=$rc"
+      [ "$rc" = 0 ] || exit "$rc"
+      certificate_id=$(jq -r '[.[] | select(.status == "ISSUED" and .domains == ["forms-test.arwox.ru"])] | last | .id // empty' <<< "$certificates")
+      [ -n "$certificate_id" ] || { printf 'issued certificate not found\n' >&2; exit 1; }
+      record yc-add "command=yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain $FQDN --certificate-id <certificate-id>"
+      if yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain "$FQDN" --certificate-id "$certificate_id"; then rc=0; else rc=$?; fi
+      record yc-add "rc=$rc"
+      [ "$rc" = 0 ] || exit "$rc"
+    fi
     started=$(jq -r '.started // empty' "$STATE" 2>/dev/null || true)
     started=${started:-$(date +%s)}
-    wait_for "$GW" "$started"
+    if wait_for "$GW" "$started" '' '' 600; then
+      :
+    else
+      rc=$?
+      [ "$rc" = 124 ] || exit "$rc"
+      "$DIR/dns-switch.sh" apply normal --fqdn "$FQDN"
+      printf '⚠️ сторож не вернул DNS — возвращено тестом\n'
+      wait_for "$GW" "$started" '' '' 600
+    fi
     record step-4 "gateway=$GW"
     printf '4) Возврат на Яндекс: %s (всего %s мин)\n' "$(date -u +%T)" "$(elapsed_minutes "$started")"
+    [ "$attached" = 0 ] || printf '✅ Уже восстановлено\n'
     ;;
   *) usage ;;
 esac
