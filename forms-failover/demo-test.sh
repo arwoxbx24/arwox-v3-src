@@ -35,6 +35,7 @@ exit 0
 EOF
   cat > "$TMP/run/bin/sleep" <<'EOF'
 #!/usr/bin/env bash
+if [ "${DEMO_AUTO_RESTORE:-}" = 1 ] && [ "${AUTO_TIMER_HOLD:-}" = 1 ]; then : > "$DEMO_TMP/timer-sleep"; exec /bin/sleep 30; fi
 if [ ! -e "$DEMO_TMP/guard-written" ]; then
   printf 'check code=000\n' >> "$GUARD_LOG"
   : > "$DEMO_TMP/guard-written"
@@ -48,9 +49,13 @@ printf '%s\n' "$(( $(cat "$DEMO_TMP/clock") + ${1:-0} ))" > "$DEMO_TMP/clock"
 EOF
   cat > "$TMP/run/bin/yc" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DEMO_TMP/yc-args"
+fqdn=${FORMS_FQDN:-forms-test.arwox.ru}
 case "$*" in
-  *'api-gateway get'*) printf '%s\n' '{"attached_domains":[{"domain":"forms-test.arwox.ru","domain_id":"domain-1"}]}' ;;
+  *'api-gateway get'*) printf '{"attached_domains":[{"domain":"%s","domain_id":"%s-id"}]}\n' "$fqdn" "$fqdn" ;;
   *'api-gateway remove-domain'*) : ;;
+  *'certificate-manager certificate list'*) printf '[{"status":"ISSUED","domains":["%s"],"id":"certificate-1"}]\n' "$fqdn" ;;
+  *'api-gateway add-domain'*) : ;;
   *) exit 1 ;;
 esac
 EOF
@@ -83,11 +88,17 @@ printf '200\n'
 EOF
   cat > "$TMP/run/dns-switch.sh" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DEMO_TMP/dns-switch.args"
 case "${1:-}" in
   status) [ "${BEGET_IP:-}" = 203.0.113.10 ] || exit 4; printf 'outage\n' ;;
   apply) printf 'CNAME\n' > "$DEMO_TMP/dns-mode"; printf 'switched outage→normal\n' ;;
   *) exit 1 ;;
 esac
+EOF
+  cat > "$TMP/run/bin/setsid" <<'EOF'
+#!/usr/bin/env bash
+[ "${RUN_TIMER:-}" = 1 ] || exit 0
+exec "$@"
 EOF
   chmod +x "$TMP/run/bin/"* "$TMP/run/dns-switch.sh"
 }
@@ -97,6 +108,11 @@ run_demo() {
     GUARD_LOG="$TMP/guard.out" GUARD_ERR="$TMP/guard.err" \
     BEGET_IP=203.0.113.10 DNS_GW_CNAME=d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net \
     bash "$TMP/run/demo.sh" "$@"
+}
+run_trace() {
+  env -u GUARD_LOG -u GUARD_ERR PATH="$TMP/run/bin:$PATH" DEMO_TMP="$TMP" \
+    BEGET_IP=203.0.113.10 DNS_GW_CNAME=d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net \
+    bash -x "$TMP/run/demo.sh" "$@"
 }
 
 case1() { # repeated stage-4 polls print one unchanged progress line
@@ -161,10 +177,39 @@ case12() { # probe explicitly carries consent
   setup A
   run_demo simulate >"$TMP/out" 2>"$TMP/err" && grep -Fq 'CONSENT=Y' "$TMP/post-body"
 }
+case13() { # production FQDN is accepted; unknown FQDN remains refused
+  setup A
+  FORMS_FQDN=forms.arwox.ru run_demo status >"$TMP/out" 2>"$TMP/err"; rc=$?
+  [ "$rc" = 0 ] || return 1
+  FORMS_FQDN=evil.example run_demo status >"$TMP/out" 2>"$TMP/err"; rc=$?
+  [ "$rc" = 2 ] && grep -Fq 'refused' "$TMP/err"
+}
+case14() { # production simulate selects production logs and its attached domain
+  setup A
+  FORMS_FQDN=forms.arwox.ru run_trace status >"$TMP/trace-out" 2>"$TMP/trace" || return 1
+  grep -Fq 'forms-gw-guard-out.log' "$TMP/trace" && grep -Fq 'forms-gw-guard-error.log' "$TMP/trace" || return 1
+  out=$(FORMS_FQDN=forms.arwox.ru run_demo simulate 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] && grep -Fq -- '--domain-id forms.arwox.ru-id' "$TMP/yc-args" && grep -Fq 'https://arwox.ru/#contact' <<< "$out"
+}
+case15() { # detached one-second timer restores DNS
+  setup A
+  RUN_TIMER=1 AUTO_RESTORE_SEC=1 run_demo simulate >"$TMP/out" 2>"$TMP/err" || return 1
+  for _ in {1..30}; do grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$TMP/dns-switch.args" && return 0; /bin/sleep 0.1; done
+  return 1
+}
+case16() { # manual restore kills a live timer and removes its PID file
+  setup A
+  RUN_TIMER=1 AUTO_TIMER_HOLD=1 AUTO_RESTORE_SEC=1 run_demo simulate >"$TMP/out" 2>"$TMP/err" || return 1
+  for _ in {1..30}; do [ -f "$TMP/timer-sleep" ] && break; /bin/sleep 0.1; done
+  [ -f "$TMP/run/state/demo.timer.pid" ] || return 1
+  pid=$(cat "$TMP/run/state/demo.timer.pid")
+  run_demo restore >"$TMP/out" 2>"$TMP/err" || return 1
+  [ ! -e "$TMP/run/state/demo.timer.pid" ] && ! kill -0 "$pid" 2>/dev/null
+}
 
 PASS=0
 FAIL=0
-for i in {1..12}; do
+for i in {1..16}; do
   if "case$i"; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); printf 'FAIL case %s\n' "$i"; fi
 done
-if [ "$FAIL" = 0 ]; then printf 'PASS %d/12\n' "$PASS"; else printf 'FAIL %d/12 (PASS %d/12)\n' "$FAIL" "$PASS"; exit 1; fi
+if [ "$FAIL" = 0 ]; then printf 'PASS %d/16\n' "$PASS"; else printf 'FAIL %d/16 (PASS %d/16)\n' "$FAIL" "$PASS"; exit 1; fi
