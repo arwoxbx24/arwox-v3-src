@@ -197,7 +197,10 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
   fi
   if [ -n "$DNS_SWITCH" ]; then
     dns_result=$(bash "$DNS_SWITCH" apply "$target" --fqdn "$GUARD_FQDN" 2>&1); dns_rc=$?
-    if [ "$dns_rc" != 0 ]; then result=$dns_result; rc=$dns_rc; fi
+    if [ "$dns_rc" != 0 ]; then
+      log "dns switch failed: ${dns_result%%$'\n'*}"
+      [ "$rc" = 0 ] && return 0
+    fi
   fi
   result=${result%%$'\n'*}
   if [ "$rc" = 0 ]; then
