@@ -19,10 +19,12 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+import threading
 from threading import Lock
 
 import consent  # реестр доказуемого согласия (M9.4), тот же каталог
 
+B24_OUTCOME = threading.local()
 WEBHOOK = os.environ["WEBHOOK_URL"].rstrip("/")
 LANDING = os.environ.get("LANDING_URL", "https://b24-qf21tb.bitrix24site.ru/")
 # Документ согласия (живая страница сайта) + папка Диска реестра.
@@ -251,6 +253,7 @@ def _lead_status(fields, ctx):
             })
     except Exception:
         pass  # ponytail: согласие best-effort, лид уже создан — ответ не рушим
+    B24_OUTCOME.value = f"lead:{res['result']}"
     return "success"
 
 
@@ -291,9 +294,11 @@ def _enqueue_lead(spool_dir, fields, ctx):
         spool = Path(spool_dir)
         if sum(1 for _ in spool.glob("*.json")) + sum(1 for _ in spool.glob("*.inflight")) >= _SPOOL_LIMIT:
             return False
-        _write_spool(spool_dir, f"{secrets.token_hex(8)}.json", {
+        name = f"{secrets.token_hex(8)}.json"
+        _write_spool(spool_dir, name, {
             "fields": fields, "ctx": ctx, "attempts": 0, "created": time.time(),
         })
+        B24_OUTCOME.value = f"queue:{name}"
     return True
 
 
@@ -325,6 +330,7 @@ def drain_spool(spool_dir, now=None):
             if status == "success":
                 inflight.unlink()
                 _spool_log(inflight.name, "sent", "success")
+                print(f"forms-backup spool-sent spool={queued.name} b24={getattr(B24_OUTCOME, 'value', '-')}", flush=True)
             elif status.startswith("transient"):
                 item["attempts"] = item.get("attempts", 0) + 1
                 _write_spool(spool_dir, queued.name, item)

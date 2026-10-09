@@ -52,6 +52,9 @@ class FormsBackupHandler(BaseHTTPRequestHandler):
             "path": request.path,
         }
         try:
+            outcome = getattr(index, "B24_OUTCOME", None)
+            if outcome is not None:
+                outcome.value = "-"
             response = index.handler(event, None)
         except Exception:
             print("forms-backup handler failed", file=sys.stderr)
@@ -72,7 +75,8 @@ class FormsBackupHandler(BaseHTTPRequestHandler):
             error = dict(parse_qsl(urlsplit(location).query)).get("err")
             result = "sent" if "#sent" in location else f"err:{error}" if error else "other"
             host = self.headers.get("Host", "").replace("\r", "").replace("\n", "")
-            print(f"forms-backup lead {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} host={host} code={response.get('statusCode', 200)} result={result}", flush=True)
+            b24 = getattr(getattr(index, "B24_OUTCOME", None), "value", "-")
+            print(f"forms-backup lead {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} host={host} code={response.get('statusCode', 200)} result={result} b24={b24}", flush=True)
 
     do_GET = _handle
     do_POST = _handle

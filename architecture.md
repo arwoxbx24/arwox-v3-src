@@ -20,7 +20,7 @@ DNS `forms.arwox.ru` → A `45.139.76.176` (наш сервер) → NPM proxy h
 | `dns-switch.sh` | Beget DNS: `status`, `apply normal` (CNAME Яндекса) / `apply outage` (A на резерв) |
 | `forms-fallback-switch.sh` | переключение формы на запасную страницу (пересечение с `dns-switch.sh` — UNVERIFIED) |
 | `server.py` | HTTP-обёртка `index.py` на резерве + очередь |
-| `demo.sh` | живой тест на `forms-test.arwox.ru` (`simulate`/`restore`/`status`), боевой адрес не трогает |
+| `forms-ctl.sh` | живой тест резерва (`test`/`restore`/`status`): по умолчанию `forms-test.arwox.ru`; `--prod` — боевой `forms.arwox.ru`, только по слову владельца |
 | `*-test.sh`, `server-test.py` | тесты без сети |
 
 ## Бэкенд (`site78-releases/2026-07-29/backend-arwox-lead-form/`)
@@ -36,24 +36,23 @@ DNS `forms.arwox.ru` → A `45.139.76.176` (наш сервер) → NPM proxy h
 | pm2 | Скрипт | Режим | Источник |
 |---|---|---|---|
 | `forms-backup` | `forms-failover/server.py` | постоянно (autorestart) | `ecosystem.config.js:204-218` |
-| `forms-gw-guard` | `forms-failover/forms-gw-guard.sh` | cron `*/15 * * * *` | `ecosystem.config.js:221-238` |
+| `forms-gw-guard` | `forms-failover/forms-gw-guard.sh` | cron `* * * * *` | `ecosystem.config.js:221-238` |
 | `forms-gw-guard-test` | `forms-failover/forms-gw-guard.sh` | cron `* * * * *` | `ecosystem.config.js:241-258` |
 - Логи: `/root/.pm2/logs/forms-backup-{out,error}.log`, `forms-gw-guard-{out,error}.log`, `forms-gw-guard-test-{out,error}.log`.
-- Среды: тест `forms-test.arwox.ru` (`demo.sh`), бой `forms.arwox.ru`.
+- Среды: тест `forms-test.arwox.ru` (`forms-ctl.sh`), бой `forms.arwox.ru` (`forms-ctl.sh --prod`).
 - Откат на норму: `dns-switch.sh apply normal` (CNAME Яндекса).
 - Выкладка Cloud Function: скрипта в репо нет (grep `function version create` → 0, 09.10) — способ UNVERIFIED.
 
 ## Известные дефекты (09.10)
-- `dns-switch.sh` для `forms.arwox.ru` → `api_error METHOD_FAILED` (Beget getData); для `forms-test` работает. Боевой адрес автоматически не переключается.
 - Предпроверка `dns-switch.sh:73` отклоняет резерв с принудительным HTTPS (301) — исправление в атоме `dcfg-1ci20.14`.
 - Капчи на резерве нет (`SMARTCAPTCHA` в конфиге резерва — 0 упоминаний).
 
 ## Стратегия проверок (задаётся до кода, не по ходу)
 Три уровня, каждый пишется один раз и гоняется один раз на атом:
 1. **Синтаксис** — `bash -n` для `.sh`, `python3 -m py_compile` для `.py`. Секунды, без сети.
-2. **Логика без сети** — `forms-gw-guard-test.sh`, `demo-test.sh`, `server-test.py`. Правило изоляции: каждый кейс сам задаёт все переменные окружения и свой каталог; кейс не меняет глобальные переменные для следующих (`export` внутри кейса — только в subshell). Нарушение 09.10: `export DNS_SWITCH=<заглушка>` в кейсах 24–27 сломал кейсы 28–30.
+2. **Логика без сети** — `forms-gw-guard-test.sh`, `forms-ctl-test.sh`, `server-test.py`. Правило изоляции: каждый кейс сам задаёт все переменные окружения и свой каталог; кейс не меняет глобальные переменные для следующих (`export` внутри кейса — только в subshell). Нарушение 09.10: `export DNS_SWITCH=<заглушка>` в кейсах 24–27 сломал кейсы 28–30.
 3. **Среда, только чтение** — до живого теста одна проверка фактов внешних систем: Beget `getData` для каждого имени, которое скрипт будет менять (09.10: `forms.arwox.ru` → `METHOD_FAILED`); ответ резерва по HTTP и HTTPS через `--resolve` (09.10: 301 вместо 302 после сертификата); `dig` текущей записи. Заглушки эти факты не ловят.
-Живой тест (`demo.sh simulate`) — один раз, только после зелёных 1–3. Упал — причина в bd, без повтора по кругу.
+Живой тест (`forms-ctl.sh test`) — один раз, только после зелёных 1–3. Упал — причина в bd, без повтора по кругу.
 
 ## Источники правил (не дублировать)
 - Правила агентов: `/root/CLAUDE.md` → `/root/workspaces/projects/CLAUDE.md` → `.claude/rules/`; проектные (Claude и Codex) — `AGENTS.md`.

@@ -1,16 +1,17 @@
 # Проверка переключения формы
 
-Проверяем тестовый адрес: при недоступности шлюза Яндекса DNS переводит его на
-резервный сервер, после восстановления возвращает обратно. Боевой
-`forms.arwox.ru` эти скрипты не трогают.
+Проверяем адрес формы: при недоступности шлюза Яндекса DNS переводит его на
+резервный сервер, после восстановления возвращает обратно. По умолчанию —
+тестовый `forms-test.arwox.ru`; `--prod` — боевой `forms.arwox.ru`, только по
+слову владельца. `restore` без `--prod` не трогает боевой тест, и наоборот.
 
 Команды по порядку:
 
 ```bash
-bash /root/workspaces/projects/arwox-v3-src/forms-failover/demo.sh status
-bash /root/workspaces/projects/arwox-v3-src/forms-failover/demo.sh simulate
+bash /root/workspaces/projects/arwox-v3-src/forms-failover/forms-ctl.sh status [--prod]
+bash /root/workspaces/projects/arwox-v3-src/forms-failover/forms-ctl.sh test [--prod]
 # Откройте https://forms-test.arwox.ru в браузере и убедитесь, что показана форма.
-bash /root/workspaces/projects/arwox-v3-src/forms-failover/demo.sh restore
+bash /root/workspaces/projects/arwox-v3-src/forms-failover/forms-ctl.sh restore [--prod]
 ```
 
 `1)` домен отключён от шлюза Яндекса.
