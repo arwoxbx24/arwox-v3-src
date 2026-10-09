@@ -45,7 +45,7 @@ for arg in "$@"; do
   if [ "$prev" = "-w" ] || [ "$prev" = "-D" ] || [ "$prev" = "--max-time" ] || [ "$prev" = "-H" ]; then prev=""; continue; fi
   if [ "$prev" = "-K" ]; then [ "$arg" = "-" ] && use_k=1; prev=""; continue; fi
   case "$arg" in
-    -s|-sS|-sI|-k|-I) ;;
+    -s|-sS|-sI|-sk|-k|-I) ;;
     -o|-w|-D|--max-time|-H|-K|-X|--data-binary|--resolve) prev="$arg" ;;
     *) [ -z "$url" ] && url="$arg" ;;
   esac
@@ -118,9 +118,14 @@ case "$url" in
   *billingAccounts*)
     printf '{"billingAccounts":[{"active":true,"balance":"%s"}]}\n' "$(cat "$GUARD_TEST_TMP/balance")"
     ;;
-  http://*/)
+  http://*/|https://*/)
     if [ -n "$use_resolve" ]; then
-      cat "$GUARD_TEST_TMP/precheck.hdr"
+      scheme=${url%%://*}
+      if [ -e "$GUARD_TEST_TMP/precheck.$scheme.hdr" ]; then
+        cat "$GUARD_TEST_TMP/precheck.$scheme.hdr"
+      else
+        cat "$GUARD_TEST_TMP/precheck.hdr"
+      fi
     else
       [ -n "$out_file" ] && cat "$GUARD_TEST_TMP/forms.body" > "$out_file"
       printf '%s 0\n' "$(cat "$GUARD_TEST_TMP/forms.code")"
@@ -407,7 +412,7 @@ dns_setup() {
   printf '{"fqdn":"forms.arwox.ru","records":{"CNAME":[{"ttl":600,"cname":"d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net."}]}}\n' > "$dns_tmp/dns.records"
 }
 
-dns_run() { bash "$DNS_SWITCH" "$@"; }
+dns_run() { bash "$SCRIPT_DIR/dns-switch.sh" "$@"; }
 
 case17() { # status classifies normal, outage and foreign without writes
   dns_setup case17
@@ -566,13 +571,40 @@ case27() { # certificate logging has one rc line
     [ "$(grep -c ' le rc=' "$tmp/guard.log")" = 0 ]
 }
 
-for i in {1..27}; do
+case28() { # HTTPS redirect precheck permits the DNS switch
+  dns_setup case28
+  printf 'HTTP/2 301\nlocation: https://forms.arwox.ru/\n' > "$GUARD_TEST_TMP/precheck.http.hdr"
+  printf 'HTTP/2 302\nlocation: https://arwox.ru/#contact\n' > "$GUARD_TEST_TMP/precheck.https.hdr"
+  out=$(dns_run apply outage); rc=$?
+  [ "$out" = 'switched normal→outage' ] && [ "$rc" = 0 ] && \
+    grep -Fxq -- 'forms.arwox.ru:443:203.0.113.10' "$GUARD_TEST_TMP/curl.argv.log" && \
+    grep -Fxq -- 'https://forms.arwox.ru/' "$GUARD_TEST_TMP/curl.argv.log"
+}
+
+case29() { # bad HTTPS result still refuses the DNS switch
+  dns_setup case29
+  printf 'HTTP/2 301\nlocation: https://forms.arwox.ru/\n' > "$GUARD_TEST_TMP/precheck.http.hdr"
+  printf 'HTTP/2 200\n' > "$GUARD_TEST_TMP/precheck.https.hdr"
+  out=$(dns_run apply outage); rc=$?
+  printf '%s' "$out" | grep -q '^refused precheck' && [ "$rc" = 3 ] && \
+    [ ! -e "$GUARD_TEST_TMP/changeRecords.log" ]
+}
+
+case30() { # foreign redirect does not request HTTPS
+  dns_setup case30
+  printf 'HTTP/2 301\nlocation: https://evil.example/\n' > "$GUARD_TEST_TMP/precheck.http.hdr"
+  out=$(dns_run apply outage); rc=$?
+  printf '%s' "$out" | grep -q '^refused precheck' && [ "$rc" = 3 ] && \
+    ! grep -Fxq -- 'https://forms.arwox.ru/' "$GUARD_TEST_TMP/curl.argv.log"
+}
+
+for i in {1..30}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/27\n' "$PASS"
+  printf 'PASS %d/30\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/27 (PASS %d/27)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/30 (PASS %d/30)\n' "$FAIL" "$PASS"
   exit 1
 fi
