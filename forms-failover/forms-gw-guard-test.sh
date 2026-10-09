@@ -17,6 +17,8 @@ cat > "$tmp/bin/date" <<'EOF'
 #!/usr/bin/env bash
 if [ "$#" = 1 ] && [ "$1" = '+%s' ]; then
   cat "$GUARD_TEST_TMP/clock"
+elif [ "$#" = 2 ] && [ "$1" = '-u' ] && [ "$2" = '+%Y%m%dT%H%M%SZ' ] && [ -f "$GUARD_TEST_TMP/snapshot.timestamp" ]; then
+  cat "$GUARD_TEST_TMP/snapshot.timestamp"
 else
   exec "$GUARD_TEST_REAL_DATE" "$@"
 fi
@@ -147,7 +149,14 @@ case "$*" in
     ;;
 esac
 EOF
-chmod +x "$tmp/bin/curl" "$tmp/bin/yc"
+cat > "$tmp/bin/dig" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *@ns*.beget.*) printf '203.0.113.10\n' ;;
+  *) printf '203.0.113.9\n' ;;
+esac
+EOF
+chmod +x "$tmp/bin/curl" "$tmp/bin/yc" "$tmp/bin/dig"
 chmod +x "$tmp/bin/date"
 
 export PATH="$tmp/bin:$PATH"
@@ -448,13 +457,52 @@ case19() { # third consecutive API failure sends exactly one alert and success r
   [ "$out" = normal ] && [ "$rc" = 0 ] && jq -e '.api_fail == 0' "$GUARD_STATE_DIR/forms-dns.forms.arwox.ru.json" >/dev/null
 }
 
-for i in {1..19}; do
+snapshot_setup() {
+  export GUARD_TEST_TMP="$tmp" GUARD_STATE_DIR="$tmp/state"
+  unset GUARD_GW_HOST
+  fallback_setup
+  rm -rf "$GUARD_STATE_DIR/incidents"
+  printf '20261009T000001Z\n' > "$GUARD_TEST_TMP/snapshot.timestamp"
+}
+
+case20() { # outage stores one complete snapshot and reports its path
+  snapshot_setup
+  run_guard; run_guard
+  snapshot=$(find "$GUARD_STATE_DIR/incidents" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+  [ "$(printf '%s\n' "$snapshot" | wc -l)" = 1 ] && \
+    [ -f "$snapshot/curl.txt" ] && [ -f "$snapshot/dns.txt" ] && \
+    [ "$(cat "$snapshot/guard.txt")" = 'no log' ] && \
+    grep -Fq "Снимок: $snapshot" "$tmp/sent.log"
+}
+
+case21() { # normal transition leaves the outage snapshot count unchanged
+  before=$(find "$GUARD_STATE_DIR/incidents" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+  printf '302\n' > "$tmp/forms.code"
+  run_guard; run_guard
+  after=$(find "$GUARD_STATE_DIR/incidents" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+  [ "$before" = 1 ] && [ "$after" = "$before" ]
+}
+
+case22() { # twelve outages retain only the ten newest snapshots
+  local i
+  snapshot_setup
+  for i in {1..12}; do
+    printf '20261009T0000%02dZ\n' "$i" > "$GUARD_TEST_TMP/snapshot.timestamp"
+    run_guard; run_guard
+    printf '302\n' > "$tmp/forms.code"
+    run_guard; run_guard
+    printf '000\n' > "$tmp/forms.code"
+  done
+  [ "$(find "$GUARD_STATE_DIR/incidents" -mindepth 1 -maxdepth 1 -type d | wc -l)" = 10 ]
+}
+
+for i in {1..22}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/19\n' "$PASS"
+  printf 'PASS %d/22\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/19 (PASS %d/19)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/22 (PASS %d/22)\n' "$FAIL" "$PASS"
   exit 1
 fi
