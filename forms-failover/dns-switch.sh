@@ -56,8 +56,8 @@ api_error() {
 load_mode() {
   beget dns/getData "$(jq -cn --arg fqdn "$DNS_FQDN" '{fqdn:$fqdn}')" || return 1
   DNS_DATA=$BEGET_RESULT
-  if jq -e --arg cname "$DNS_GW_CNAME" '(.records.CNAME // []) as $c | (.records.A // []) as $a | ($c|length)==1 and ($a|length)==0 and ($c[0].value|sub("\\.$"; "")) == $cname' <<< "$DNS_DATA" >/dev/null; then MODE=normal
-  elif jq -e --arg ip "$BEGET_IP" '(.records.CNAME // []) as $c | (.records.A // []) as $a | ($a|length)==1 and ($c|length)==0 and $ip != "" and $a[0].value == $ip' <<< "$DNS_DATA" >/dev/null; then MODE=outage
+  if jq -e --arg cname "$DNS_GW_CNAME" '(.records.CNAME // []) as $c | (.records.A // []) as $a | ($c|length)==1 and ($a|length)==0 and (($c[0].cname // $c[0].value // "")|sub("\\.$"; "")) == $cname' <<< "$DNS_DATA" >/dev/null; then MODE=normal
+  elif jq -e --arg ip "$BEGET_IP" '(.records.CNAME // []) as $c | (.records.A // []) as $a | ($a|length)==1 and ($c|length)==0 and $ip != "" and ($a[0].address // $a[0].value // "") == $ip' <<< "$DNS_DATA" >/dev/null; then MODE=outage
   else MODE=foreign; fi
 }
 load_mode || api_error

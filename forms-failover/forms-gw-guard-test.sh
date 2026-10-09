@@ -401,7 +401,7 @@ dns_setup() {
   export TG_BOT_TOKEN=x TG_CHAT_ID=1
   printf '100000\n' > "$dns_tmp/clock"
   printf 'BEGET_LOGIN=test\nBEGET_API_PASSWORD=test\n' > "$BEGET_ENV_FILE"
-  printf '{"fqdn":"forms.arwox.ru","records":{"CNAME":[{"priority":10,"value":"d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net"}]}}\n' > "$dns_tmp/dns.records"
+  printf '{"fqdn":"forms.arwox.ru","records":{"CNAME":[{"ttl":600,"cname":"d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net."}]}}\n' > "$dns_tmp/dns.records"
 }
 
 dns_run() { bash "$DNS_SWITCH" "$@"; }
@@ -496,13 +496,24 @@ case22() { # twelve outages retain only the ten newest snapshots
   [ "$(find "$GUARD_STATE_DIR/incidents" -mindepth 1 -maxdepth 1 -type d | wc -l)" = 10 ]
 }
 
-for i in {1..22}; do
+case23() { # DNS failure stays in dns-switch notification channel
+  snapshot_setup
+  export FALLBACK_PAGE_ID= FALLBACK_BLOCK_ID= DNS_SWITCH="$tmp/dns-fail.sh"
+  printf '#!/usr/bin/env bash\nprintf "dns failure\\n"\nexit 4\n' > "$DNS_SWITCH"
+  chmod +x "$DNS_SWITCH"
+  run_guard; run_guard
+  ! grep -q 'dns failure\|fallback_outage' "$tmp/sent.log" 2>/dev/null && \
+    grep -q 'dns switch failed: dns failure' "$tmp/guard.log" && \
+    jq -e '(.fallback_mode // "normal") != "outage"' "$tmp/state/state.json" >/dev/null
+}
+
+for i in {1..23}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/22\n' "$PASS"
+  printf 'PASS %d/23\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/22 (PASS %d/22)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/23 (PASS %d/23)\n' "$FAIL" "$PASS"
   exit 1
 fi
