@@ -12,7 +12,15 @@ esac
 mkdir -p "$DIR/state"
 STATE="$DIR/state/demo.json"
 LOG="$DIR/state/demo.log"
+LOCK="$DIR/state/demo.lock"
+GUARD_LOG=${GUARD_LOG:-/root/.pm2/logs/forms-gw-guard-test-out.log}
 COMMAND=${1:-}
+
+STEP_1='Сбой Яндекса имитирован'
+STEP_2='Сторож заметил сбой'
+STEP_3='DNS переключён на резерв'
+STEP_4='Сертификат на резерве готов'
+STEP_5='Заявка принята резервом'
 
 record() { printf '%s %s %s %s\n' "$(date -u +%FT%TZ)" "$COMMAND" "$1" "$2" >> "$LOG"; }
 finish() {
@@ -37,29 +45,118 @@ yandex_code() {
 }
 backup_code() {
   local code=000 rc=0
-  if code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 --resolve "$FQDN:443:$BEGET_IP" "https://$FQDN/"); then rc=0; else rc=$?; fi
+  if code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 --resolve "$FQDN:80:$BEGET_IP" "http://$FQDN/"); then rc=0; else rc=$?; fi
   record backup-http "code=${code:-000} remote_ip=$BEGET_IP rc=$rc"
   printf '%s\n' "${code:-000}"
 }
+lock_demo() {
+  local at
+  exec 9>>"$LOCK"
+  if ! flock -n 9; then
+    at=$(jq -r '.at // empty' "$STATE" 2>/dev/null || true)
+    [ -n "$at" ] || at=$(tail -n 1 "$LOCK" 2>/dev/null || true)
+    printf '⛔ Тест уже идёт (запущен %s) — дождитесь окончания\n' "${at:-неизвестно}" >&2
+    exit 75
+  fi
+  printf '%s\n' "$(date -u +%FT%TZ)" > "$LOCK"
+}
+elapsed_minutes() { printf '%s\n' "$(( ($(date +%s) - $1 + 59) / 60 ))"; }
+complete_stage() {
+  local stage=$1 label=$2 started=$3
+  record "step-$stage" "passed=1"
+  printf '✅ Этап %s/5: %s (+%s мин)\n' "$stage" "$label" "$(elapsed_minutes "$started")"
+}
+guard_lines() {
+  [ -r "$GUARD_LOG" ] && tail -n "+$((guard_log_start + 1))" "$GUARD_LOG" || true
+}
+guard_event() {
+  local line event='ожидание события'
+  while IFS= read -r line; do
+    case "$line" in
+      *'check code=000'*) event='форма не отвечает' ;;
+      *'debounced outage'*) event='сбой подтверждён' ;;
+      *'sent fallback_outage'*) event='резерв включён' ;;
+      *'ssl request rc=0'*) event='сертификат запрошен' ;;
+      *'ssl request rc='*) event='сертификат: ошибка, повтор через 15 мин' ;;
+      *) event=$line ;;
+    esac
+  done < <(guard_lines)
+  printf '%s\n' "$event"
+}
+guard_dns_failure() {
+  local line failure=
+  while IFS= read -r line; do
+    case "$line" in *'dns switch failed: '*) failure=${line#*dns switch failed: } ;; esac
+  done < <(guard_lines)
+  printf '%s\n' "$failure"
+}
+progress() {
+  local started=$1 stage=$2 label=$3 dns=$4
+  printf '[+%s мин] Этап %s/5: %s ⏳ | DNS %s/6 | сторож: %s\n' "$(elapsed_minutes "$started")" "$stage" "$label" "$dns" "$(guard_event)"
+}
+dns_count() {
+  local wanted=$1 ns value count=0
+  local -a names=(ns1.beget.pro ns2.beget.pro ns1.beget.ru ns2.beget.ru ns1.beget.com ns2.beget.com)
+  for ns in "${names[@]}"; do
+    value=$(dig +norecurse +short "$FQDN" "@$ns" | paste -sd, -)
+    [ "${value%.}" = "${wanted%.}" ] && count=$((count + 1))
+  done
+  printf '%s\n' "$count"
+}
 wait_for() {
-  local wanted=$1 started=$2 elapsed ns value all details
+  local wanted=$1 started=$2 stage=${3:-} label=${4:-} elapsed ns value all details count failure
   local -a names=(ns1.beget.pro ns2.beget.pro ns1.beget.ru ns2.beget.ru ns1.beget.com ns2.beget.com)
   while :; do
-    all=1
+    all=1; count=0
     details="expected=$wanted"
     for ns in "${names[@]}"; do
       value=$(dig +norecurse +short "$FQDN" "@$ns" | paste -sd, -)
       details+=" $ns=${value:-empty}"
-      [ "${value%.}" = "${wanted%.}" ] || all=0
+      if [ "${value%.}" = "${wanted%.}" ]; then count=$((count + 1)); else all=0; fi
     done
     record wait "$details"
-    [ "$all" = 1 ] && return 0
+    if [ -n "$stage" ]; then
+      failure=$(guard_dns_failure)
+      if [ -n "$failure" ]; then printf '❌ Этап 3/5: переключение DNS отклонено: %s\n' "$failure" >&2; return 1; fi
+      progress "$started" "$stage" "$label" "$count"
+      [ "$all" = 1 ] && { complete_stage "$stage" "$label" "$started"; return 0; }
+    elif [ "$all" = 1 ]; then
+      return 0
+    fi
     elapsed=$(( $(date +%s) - started ))
-    if [ "$elapsed" -ge 1200 ]; then printf 'timeout: expected %s across all Beget NS\n' "$wanted" >&2; record wait "timeout=1 elapsed=$elapsed"; return 1; fi
+    if [ "$elapsed" -ge 1200 ]; then
+      record wait "timeout=1 elapsed=$elapsed"
+      if [ -n "$stage" ]; then printf '❌ Этап %s/5: ожидание превысило 20 мин\n' "$stage" >&2; else printf 'timeout: expected %s across all Beget NS\n' "$wanted" >&2; fi
+      return 1
+    fi
     sleep 15
   done
 }
-elapsed_minutes() { printf '%s\n' "$(( ($(date +%s) - $1 + 59) / 60 ))"; }
+wait_for_guard() {
+  local started=$1 elapsed failure lines
+  while :; do
+    failure=$(guard_dns_failure)
+    if [ -n "$failure" ]; then printf '❌ Этап 3/5: переключение DNS отклонено: %s\n' "$failure" >&2; return 1; fi
+    progress "$started" 2 "$STEP_2" "$(dns_count "$BEGET_IP")"
+    lines=$(guard_lines)
+    if [[ "$lines" == *'check code=000'* || "$lines" == *'debounced outage'* ]]; then complete_stage 2 "$STEP_2" "$started"; return 0; fi
+    elapsed=$(( $(date +%s) - started ))
+    [ "$elapsed" -lt 1200 ] || { printf '❌ Этап 2/5: сторож не подтвердил сбой за 20 мин\n' >&2; return 1; }
+    sleep 15
+  done
+}
+wait_for_certificate() {
+  local started=$1 elapsed failure
+  while :; do
+    failure=$(guard_dns_failure)
+    if [ -n "$failure" ]; then printf '❌ Этап 3/5: переключение DNS отклонено: %s\n' "$failure" >&2; return 1; fi
+    progress "$started" 4 "$STEP_4" "$(dns_count "$BEGET_IP")"
+    if curl -s -o /dev/null --max-time 10 --resolve "$FQDN:443:$BEGET_IP" "https://$FQDN/"; then complete_stage 4 "$STEP_4" "$started"; return 0; fi
+    elapsed=$(( $(date +%s) - started ))
+    [ "$elapsed" -lt 1200 ] || { printf '❌ Этап 4/5: сертификат не готов за 20 мин\n' >&2; return 1; }
+    sleep 15
+  done
+}
 
 case ${1:-} in
   status)
@@ -70,12 +167,15 @@ case ${1:-} in
     printf 'dns=%s yandex=HTTP %s backup=HTTP %s\n' "$dns" "$(yandex_code)" "$(backup_code)"
     ;;
   simulate)
+    lock_demo
+    guard_log_start=0
+    [ -r "$GUARD_LOG" ] && guard_log_start=$(wc -l < "$GUARD_LOG")
     record yc-get "command=yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json"
     if gateway=$(yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json); then rc=0; else rc=$?; fi
     record yc-get "rc=$rc"
     [ "$rc" = 0 ] || exit "$rc"
     domain_id=$(jq -r '.attached_domains[] | select(.domain == "forms-test.arwox.ru") | .domain_id' <<< "$gateway" | tail -1)
-    [ -n "$domain_id" ] && [ "$domain_id" != null ] || { printf 'domain id not found\n' >&2; exit 1; }
+    if [ -z "$domain_id" ] || [ "$domain_id" = null ]; then printf 'ℹ️ Сбой уже имитирован — сначала ./demo.sh restore\n'; exit 0; fi
     record yc-remove "command=yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id <domain-id>"
     if yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id "$domain_id"; then rc=0; else rc=$?; fi
     record yc-remove "rc=$rc"
@@ -83,11 +183,10 @@ case ${1:-} in
     started=$(date +%s)
     jq -cn --argjson started "$started" --arg at "$(date -u +%FT%TZ)" '{started:$started,at:$at}' > "$STATE"
     record state "saved=$STATE started=$started"
-    record step-1 "outage-simulated=1"
-    printf '1) Сбой Яндекса имитирован: %s\n' "$(date -u +%T)"
-    wait_for "$BEGET_IP" "$started"
-    record step-2 "backup=$BEGET_IP"
-    printf '2) Переключено на резерв (наш сервер): %s (+%s мин)\n' "$(date -u +%T)" "$(elapsed_minutes "$started")"
+    complete_stage 1 "$STEP_1" "$started"
+    wait_for_guard "$started"
+    wait_for "$BEGET_IP" "$started" 3 "$STEP_3"
+    wait_for_certificate "$started"
     response=$(mktemp "$DIR/state/demo.XXXXXX")
     headers=$(mktemp "$DIR/state/demo.XXXXXX")
     record backup-post "command=curl POST --resolve $FQDN:443:$BEGET_IP"
@@ -96,13 +195,19 @@ case ${1:-} in
     location=$(awk 'BEGIN { IGNORECASE=1 } /^location:/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$headers")
     record backup-post "HTTP=$code ssl_verify_result=${ssl_verify_result:-none} remote_ip=${remote_ip:-none} Location=${location:-none} rc=$rc"
     if [ "$code" = 200 ] && grep -q 'smartcaptcha.yandexcloud.net/captcha.js' "$response"; then
-      record step-3 "backup-handler=ok HTTP=$code captcha=shown"
-      printf '3) Заявка дошла до резервного обработчика: HTTP %s, показана капча\n' "$code"
+      complete_stage 5 "$STEP_5" "$started"
+      printf '🏁 Тест пройден: 5/5 за %s мин\n' "$(elapsed_minutes "$started")"
     else
-      printf 'backup handler check failed: HTTP %s\n' "${code:-000}" >&2; exit 1
+      printf '❌ Этап 5/5: заявка не принята резервом: HTTP %s\n' "${code:-000}" >&2; exit 1
     fi
     ;;
   restore)
+    lock_demo
+    record yc-get "command=yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json"
+    if gateway=$(yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json); then rc=0; else rc=$?; fi
+    record yc-get "rc=$rc"
+    [ "$rc" = 0 ] || exit "$rc"
+    if jq -e '.attached_domains[]? | select(.domain == "forms-test.arwox.ru")' >/dev/null <<< "$gateway"; then printf '✅ Уже восстановлено\n'; exit 0; fi
     record yc-certificate-list "command=yc --profile default certificate-manager certificate list --format json"
     if certificates=$(yc --profile default certificate-manager certificate list --format json); then rc=0; else rc=$?; fi
     record yc-certificate-list "rc=$rc"
