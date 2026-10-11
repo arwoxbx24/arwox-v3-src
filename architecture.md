@@ -13,6 +13,12 @@
 ## Поток заявки (резерв)
 DNS `forms.arwox.ru` → A `45.139.76.176` (наш сервер) → NPM proxy host 40 → pm2 `forms-backup` (`server.py`, 172.20.0.1:20140) → тот же `index.py` → Bitrix24. При временном отказе Bitrix24 — очередь `/var/lib/forms-backup/spool`, досылка раз в 60 с.
 
+## Yandex Cloud: квоты и зоны (11.10.2026)
+- На Яндексе у нас только serverless: API Gateway `arwox-forms-gw` и одна Cloud Function, ВМ и дисков нет. Ручное управление квотами на ВМ и диски (письмо Яндекса 11.10) схему заявок не задевает: она не создаёт новых ресурсов.
+- Посмотреть квоты: `yc quota-manager quota-limit list` / `get` (https://yandex.cloud/ru/docs/cli/release-notes); точные флаги — `--help` перед вызовом.
+- Увеличить квоту: `yc quota-manager quota-request create` / `get` или REST `QuotaRequest` Create (https://yandex.cloud/ru/docs/quota-manager/quickstart), либо техподдержка. Квоту можно изменить по запросу, лимит — нельзя (https://yandex.cloud/ru/docs/compute/concepts/limits).
+- Инцидент 11.10: по письму Яндекса недоступна зона ru-central1-b; шлюз не отвечает с 01:50Z 11.10 (TCP timeout, `dcfg-jcwf2`), заявки принимает резерв. Связь отказа шлюза с этой зоной — UNVERIFIED: зона шлюза не проверялась.
+
 ## Части резерва (`forms-failover/`)
 | Файл | Роль |
 |---|---|
