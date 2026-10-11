@@ -158,6 +158,52 @@ form_err_code() { # notify form_error when code is 5xx or 000
   fi
 }
 
+incident_classify() { # failed-run diagnosis: sets cls (Yandex доступен первым двум пробам)
+  cls=unknown
+  local c1 c2 st
+  c1=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 https://storage.yandexcloud.net/ 2>/dev/null) || true
+  c1=${c1:-000}
+  c2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 https://ya.ru/ 2>/dev/null) || true
+  c2=${c2:-000}
+  st="{}"
+  if [ -f "$STATE_FILE" ]; then st=$(cat "$STATE_FILE" 2>/dev/null) || st="{}"; fi
+  printf '%s' "$st" | jq -e . >/dev/null 2>&1 || st="{}"
+  if [ "$c1" = 000 ] && [ "$c2" = 000 ]; then cls=network; return; fi
+  if [ "${stopped:-0}" = 1 ]; then cls=gw_stopped; return; fi
+  if printf '%s' "$st" | jq -e --argjson m "$GUARD_BALANCE_MIN" \
+    '.last_active == "false" or ((try (.last_balance | tonumber) catch null) as $b | ($b | type) == "number" and $b < $m)' \
+    >/dev/null 2>&1; then cls=billing; return; fi
+  if [ "$dns_empty" = 1 ]; then cls=yandex_service; return; fi
+  case "${code:-000}" in
+    000|5??) cls=yandex_service; return ;;
+  esac
+  if printf '%s' "$st" | jq -e '.last_iam_ok == false or .last_active == "" or .last_active == "null" or (has("last_active") and .last_active == null)' \
+    >/dev/null 2>&1; then cls=access; fi
+}
+
+incident_text() { # class → короткий текст для сообщения (класс добавляет вызывающий)
+  case "$1" in
+    yandex_service) printf 'Yandex API Gateway недоступен, остальной Yandex Cloud отвечает' ;;
+    gw_stopped) printf 'шлюз форм остановлен в Yandex Cloud' ;;
+    billing) printf 'баланс Yandex Cloud %s ₽ или аккаунт не активен' "$(jq -r '.last_balance // "неизвестен"' "$STATE_FILE" 2>/dev/null)" ;;
+    access) printf 'нет доступа сторожа к Yandex Cloud (IAM/биллинг)' ;;
+    network) printf 'у сервера нет сети до Yandex Cloud' ;;
+    *) printf 'причина не определена (код %s)' "${code:-000}" ;;
+  esac
+}
+
+fallback_failed() { # failed-run bookkeeping: класс инцидента в state и лог, затем счётчик
+  incident_classify
+  log "class=$cls"
+  local st
+  st='{"incident_class":"'"$cls"'"}'
+  if [ -f "$STATE_FILE" ] && st=$(cat "$STATE_FILE" 2>/dev/null) && printf '%s' "$st" | jq -e . >/dev/null 2>&1; then
+    st=$(printf '%s' "$st" | jq -c --arg c "$cls" '.incident_class=$c')
+  fi
+  printf '%s\n' "$st" | state_write
+  fallback_track failed
+}
+
 incident_snapshot() {
   local incidents dir ip oldest
   local -a resolve=()
@@ -206,6 +252,9 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
       ;;
     *) return 0 ;;
   esac
+  if [ "$target" = outage ]; then
+    state=$(echo "$state" | jq '.outage_class = (.incident_class // "unknown")')
+  fi
   printf '%s\n' "$state" | state_write
   rc=0
   result=
@@ -229,8 +278,23 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
   if [ "$rc" = 0 ]; then
     jq --arg mode "$target" '.fallback_mode=$mode | del(.dns_fail_snapshot)' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
     case "$target" in
-      outage) snapshot=$(incident_snapshot); notify fallback_outage "$GUARD_FQDN: сбой основного канала, заявки принимает резерв. Снимок: $snapshot" ;;
-      normal) notify fallback_normal "$GUARD_FQDN: основной канал стабилен $GUARD_RISE_N мин, вернулись на основной." ;;
+      outage)
+        snapshot=$(incident_snapshot)
+        notify fallback_outage "$GUARD_FQDN: сбой основного канала — $(incident_text "$cls") ($cls), заявки принимает резерв, ждём восстановления. Статус Яндекса: https://status.yandex.cloud. Снимок: $snapshot"
+        ;;
+      normal)
+        oc=$(jq -r '.outage_class // .incident_class // "unknown"' "$STATE_FILE" 2>/dev/null); oc=${oc:-unknown}
+        started=$(jq -r '.form_outage_started_at // 0' "$STATE_FILE" 2>/dev/null)
+        case "$started" in ''|*[!0-9]*) started=0 ;; esac
+        if [ "$started" != 0 ]; then
+          prob_details="сбой: $oc, длительность $(outage_duration "$(( $(date +%s) - started ))")"
+        else
+          prob_details="сбой: $oc"
+        fi
+        log "recovered class=$oc"
+        notify fallback_normal "$GUARD_FQDN: восстановлено — Yandex API Gateway заработал, основной канал стабилен $GUARD_RISE_N мин, вернулись на основной ($prob_details)"
+        jq 'del(.outage_class, .incident_class)' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+        ;;
     esac
   else
     case "$result" in
@@ -263,7 +327,7 @@ if ! flock -n 9; then
 fi
 
 check_form
-[ "$dns_empty" = 1 ] && { fallback_track failed; exit 0; }
+[ "$dns_empty" = 1 ] && { fallback_failed; exit 0; }
 if [ "$stopped" = 1 ]; then
   if out=$(timeout "$GUARD_YC_TIMEOUT" yc serverless api-gateway get "$GUARD_GW_ID" --format json 2>&1); then
     status=$(printf '%s' "$out" | jq -r .status 2>/dev/null)
@@ -272,7 +336,7 @@ if [ "$stopped" = 1 ]; then
         log "resume issued"
         sleep 5
         check_form
-        [ "$dns_empty" = 1 ] && { fallback_track failed; exit 0; }
+        [ "$dns_empty" = 1 ] && { fallback_failed; exit 0; }
         if [ "$stopped" = 0 ]; then
           log "resume ok"
           notify gw_resumed "$code"
@@ -312,10 +376,11 @@ case "$code" in
 esac
 
 if [ "$failed" = 1 ] || [ "$form_error" = 1 ]; then
-  fallback_track failed
+  fallback_failed
 elif [ "${code:0:1}" = 4 ]; then
-  fallback_track failed
+  fallback_failed
 elif [ "$stopped" = 0 ] && [ "$ssl" = 0 ] && { [ "${code:0:1}" = 2 ] || [ "${code:0:1}" = 3 ]; }; then
+  log "class=ok"
   fallback_track success
 fi
 
@@ -335,6 +400,7 @@ fi
 IAM=$(timeout "$GUARD_YC_TIMEOUT" yc iam create-token 2>/dev/null)
 if [ -z "$IAM" ]; then
   log "balance skipped"
+  [ -f "$STATE_FILE" ] && jq '.last_iam_ok = false' "$STATE_FILE" > "$STATE_FILE.tmp" 2>/dev/null && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
 else
   if resp=$(printf 'url = "https://billing.api.cloud.yandex.net/billing/v1/billingAccounts"\nheader = "Authorization: Bearer %s"\n' \
       "$IAM" | curl -s --max-time 10 -K - 2>/dev/null); then
@@ -343,6 +409,10 @@ else
     log "balance $balance active=$active"
     if [ "$active" = "true" ] && awk -v b="$balance" -v m="$GUARD_BALANCE_MIN" 'BEGIN{exit !(b+0<m+0)}'; then
       notify low_balance "$balance"
+    fi
+    if [ -f "$STATE_FILE" ]; then
+      jq -c --arg a "$active" --arg b "$balance" '.last_iam_ok = true | .last_active = $a | .last_balance = $b' \
+        "$STATE_FILE" > "$STATE_FILE.tmp" 2>/dev/null && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
     fi
   fi
 fi

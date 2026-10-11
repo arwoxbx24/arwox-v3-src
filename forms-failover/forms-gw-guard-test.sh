@@ -123,6 +123,9 @@ case "$url" in
   *billingAccounts*)
     printf '{"billingAccounts":[{"active":true,"balance":"%s"}]}\n' "$(cat "$GUARD_TEST_TMP/balance")"
     ;;
+  https://storage.yandexcloud.net/*|https://ya.ru/*)
+    printf '%s\n' "$(cat "$GUARD_TEST_TMP/net.code" 2>/dev/null || echo 200)"
+    ;;
   http://*/|https://*/)
     if [ -n "$use_resolve" ]; then
       scheme=${url%%://*}
@@ -149,6 +152,10 @@ cat > "$tmp/bin/yc" <<'EOF'
 if [ -f "$GUARD_TEST_TMP/yc-hang" ]; then sleep 30; fi
 case "$*" in
   "iam create-token"*)
+    if [ -f "$GUARD_TEST_TMP/iam.fail" ]; then
+      printf 'IAM error\n' >&2
+      exit 1
+    fi
     printf 'stub-token\n'
     ;;
   "serverless api-gateway get"*)
@@ -265,7 +272,7 @@ fallback_setup() {
   printf 'ACTIVE\n' > "$tmp/gw.status"
   printf '100\n' > "$tmp/balance"
   printf '\n' > "$tmp/api.denied"
-  rm -f "$tmp/sent.log" "$tmp/api.log" "$tmp/api.header.log" "$tmp/curl.argv.log" "$tmp/state/state.json" "$tmp/published.html" "$tmp/mismatch" "$tmp/resume.fail"
+  rm -f "$tmp/sent.log" "$tmp/api.log" "$tmp/api.header.log" "$tmp/curl.argv.log" "$tmp/state/state.json" "$tmp/published.html" "$tmp/mismatch" "$tmp/resume.fail" "$tmp/net.code" "$tmp/iam.fail"
   export FALLBACK_PAGE_ID=362 FALLBACK_BLOCK_ID=9116 FALLBACK_API_URL=https://vibe.test
   export VIBECODE_API_KEY=synthetic-test-key
   export FALLBACK_SNAPSHOT="$tmp/snapshot.json"
@@ -786,13 +793,103 @@ case40() { # hung yc call: guard kills it via timeout and counts one fallback fa
     jq -e '.fallback_failures == 1' "$tmp/state/state.json" >/dev/null
 }
 
-for i in {1..40}; do
+cls_setup() { snapshot_setup; export GUARD_FALL_N=3 GUARD_RISE_N=15; unset GUARD_NOTIFY; dns_success_setup; }
+
+case41() { # rule 1: no network to Yandex at all classifies network
+  cls_setup
+  printf '000\n' > "$tmp/net.code"
+  run_guard; run_guard; run_guard
+  [ "$(jq -r '.incident_class' "$tmp/state/state.json")" = network ] && \
+    grep -q 'class=network' "$tmp/guard.log" && \
+    grep -q 'у сервера нет сети до Yandex Cloud' "$tmp/sent.log" && \
+    [ "$(grep -c '^apply outage$' "$tmp/dns-switch.calls")" = 1 ]
+}
+
+case42() { # outage then recovery: exactly two messages with class details
+  cls_setup
+  run_guard; run_guard; run_guard
+  [ "$(wc -l < "$tmp/sent.log")" = 1 ] || return 1
+  grep -q 'yandex_service' "$tmp/sent.log" && grep -q 'ждём восстановления' "$tmp/sent.log" || return 1
+  printf '302\n' > "$tmp/forms.code"
+  printf 'ok\n' > "$tmp/forms.body"
+  for i in $(seq 15); do run_guard; done
+  [ "$(wc -l < "$tmp/sent.log")" = 2 ] && \
+    grep -q 'восстановлено.*Yandex API Gateway' "$tmp/sent.log" && \
+    grep -q 'recovered class=yandex_service' "$tmp/guard.log" && \
+    jq -e '(has("incident_class") or has("outage_class")) | not' "$tmp/state/state.json" >/dev/null
+}
+
+case43() { # rule 2: stopped gateway beats service classification
+  cls_setup
+  printf '403\n' > "$tmp/forms.code"
+  printf 'form is stopped and cannot be used\n' > "$tmp/forms.body"
+  printf 'STOPPED\n' > "$tmp/gw.status"
+  touch "$tmp/resume.fail"
+  run_guard; run_guard; run_guard
+  [ "$(jq -r '.incident_class' "$tmp/state/state.json")" = gw_stopped ] && \
+    grep -q 'class=gw_stopped' "$tmp/guard.log" && \
+    grep -q 'шлюз форм остановлен в Yandex Cloud' "$tmp/sent.log"
+}
+
+case44() { # rule 3: billing state from the previous run classifies billing
+  cls_setup
+  printf '5.1\n' > "$tmp/balance"
+  run_guard; run_guard; run_guard
+  [ "$(jq -r '.incident_class' "$tmp/state/state.json")" = billing ] && \
+    grep -q 'class=billing' "$tmp/guard.log" && \
+    grep -q 'баланс Yandex Cloud 5.1 ₽ или аккаунт не активен' "$tmp/sent.log"
+}
+
+case45() { # rule 4: gateway dead while the rest of Yandex Cloud answers
+  cls_setup
+  run_guard; run_guard; run_guard
+  [ "$(jq -r '.incident_class' "$tmp/state/state.json")" = yandex_service ] && \
+    grep -q 'class=yandex_service' "$tmp/guard.log" && \
+    grep -q 'Yandex API Gateway недоступен, остальной Yandex Cloud отвечает' "$tmp/sent.log"
+}
+
+case46() { # rule 5: guard lost IAM access classifies access on non-anomaly failures
+  cls_setup
+  touch "$tmp/iam.fail"
+  printf '404\n' > "$tmp/forms.code"
+  printf 'not found\n' > "$tmp/forms.body"
+  run_guard; run_guard; run_guard
+  [ "$(jq -r '.incident_class' "$tmp/state/state.json")" = access ] && \
+    grep -q 'class=access' "$tmp/guard.log" && \
+    grep -q 'нет доступа сторожа к Yandex Cloud (IAM/биллинг)' "$tmp/sent.log"
+}
+
+case47() { # rule 6: nothing matched → unknown with the HTTP code
+  cls_setup
+  printf '404\n' > "$tmp/forms.code"
+  printf 'not found\n' > "$tmp/forms.body"
+  run_guard; run_guard; run_guard
+  [ "$(jq -r '.incident_class' "$tmp/state/state.json")" = unknown ] && \
+    grep -q 'class=unknown' "$tmp/guard.log" && \
+    grep -q 'причина не определена (код 404)' "$tmp/sent.log"
+}
+
+case48() { # starting in outage without outage_class still recovers once
+  cls_setup
+  printf '{"fallback_mode":"outage","fallback_failures":3}\n' > "$tmp/state/state.json"
+  run_guard; run_guard; run_guard
+  [ ! -s "$tmp/sent.log" ] || return 1
+  printf '302\n' > "$tmp/forms.code"
+  printf 'ok\n' > "$tmp/forms.body"
+  for i in $(seq 15); do run_guard; done
+  [ "$(wc -l < "$tmp/sent.log")" = 1 ] && \
+    grep -q 'восстановлено' "$tmp/sent.log" && \
+    grep -q 'Yandex API Gateway заработал' "$tmp/sent.log" && \
+    grep -q 'recovered class=' "$tmp/guard.log"
+}
+
+for i in {1..48}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/40\n' "$PASS"
+  printf 'PASS %d/48\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/40 (PASS %d/40)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/48 (PASS %d/48)\n' "$FAIL" "$PASS"
   exit 1
 fi
