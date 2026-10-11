@@ -17,6 +17,7 @@ GUARD_DEBOUNCE_SEC="${GUARD_DEBOUNCE_SEC:-21600}"
 GUARD_REMINDER_SEC="${GUARD_REMINDER_SEC:-3600}"
 GUARD_FALL_N="${GUARD_FALL_N:-3}"
 GUARD_RISE_N="${GUARD_RISE_N:-15}"
+GUARD_YC_TIMEOUT="${GUARD_YC_TIMEOUT:-15}"
 GUARD_NOTIFY="${GUARD_NOTIFY:-1}"
 [ "$GUARD_NOTIFY" = 0 ] && unset TG_BOT_TOKEN TG_CHAT_ID
 FALLBACK_SWITCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/forms-fallback-switch.sh"
@@ -241,7 +242,7 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
 
 mkdir -p "$GUARD_STATE_DIR"
 
-for tool in yc jq curl flock awk; do
+for tool in yc jq curl flock awk timeout; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     log "env missing $tool"
     notify gw_failed "нет инструмента $tool"
@@ -264,10 +265,10 @@ fi
 check_form
 [ "$dns_empty" = 1 ] && { fallback_track failed; exit 0; }
 if [ "$stopped" = 1 ]; then
-  if out=$(yc serverless api-gateway get "$GUARD_GW_ID" --format json 2>&1); then
+  if out=$(timeout "$GUARD_YC_TIMEOUT" yc serverless api-gateway get "$GUARD_GW_ID" --format json 2>&1); then
     status=$(printf '%s' "$out" | jq -r .status 2>/dev/null)
     if [ "$status" = "STOPPED" ]; then
-      if out=$(yc serverless api-gateway resume "$GUARD_GW_ID" 2>&1); then
+      if out=$(timeout "$GUARD_YC_TIMEOUT" yc serverless api-gateway resume "$GUARD_GW_ID" 2>&1); then
         log "resume issued"
         sleep 5
         check_form
@@ -331,7 +332,7 @@ if [ "$(jq -r '.fallback_mode // "normal"' <<<"$state")" = outage ] && [ -n "$NP
   fi
 fi
 
-IAM=$(yc iam create-token 2>/dev/null)
+IAM=$(timeout "$GUARD_YC_TIMEOUT" yc iam create-token 2>/dev/null)
 if [ -z "$IAM" ]; then
   log "balance skipped"
 else

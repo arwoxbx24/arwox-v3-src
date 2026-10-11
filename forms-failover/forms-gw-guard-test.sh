@@ -146,6 +146,7 @@ EOF
 cat > "$tmp/bin/yc" <<'EOF'
 #!/usr/bin/env bash
 # Test stub for yc. Scenarios are driven by files in $GUARD_TEST_TMP.
+if [ -f "$GUARD_TEST_TMP/yc-hang" ]; then sleep 30; fi
 case "$*" in
   "iam create-token"*)
     printf 'stub-token\n'
@@ -767,13 +768,31 @@ case39() { # three empty gateway DNS results switch to outage once
     jq -e '.fallback_mode == "outage" and .fallback_failures == 3' "$tmp/state/state.json" >/dev/null
 }
 
-for i in {1..39}; do
+case40() { # hung yc call: guard kills it via timeout and counts one fallback failure
+  snapshot_setup
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  dns_success_setup
+  touch "$tmp/yc-hang"
+  printf '403\n' > "$tmp/forms.code"
+  printf 'form is stopped and cannot be used\n' > "$tmp/forms.body"
+  printf 'STOPPED\n' > "$tmp/gw.status"
+  export GUARD_YC_TIMEOUT=1
+  timeout 20 bash "$GUARD" > "$tmp/guard.log" 2>&1
+  local rc=$?
+  rm -f "$tmp/yc-hang"
+  unset GUARD_YC_TIMEOUT
+  [ "$rc" != 124 ] && \
+    grep -q 'resume failed' "$tmp/guard.log" && \
+    jq -e '.fallback_failures == 1' "$tmp/state/state.json" >/dev/null
+}
+
+for i in {1..40}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/39\n' "$PASS"
+  printf 'PASS %d/40\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/39 (PASS %d/39)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/40 (PASS %d/40)\n' "$FAIL" "$PASS"
   exit 1
 fi
