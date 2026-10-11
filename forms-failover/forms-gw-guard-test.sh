@@ -69,6 +69,11 @@ if [ -n "$use_k" ]; then
   done
 fi
 case "$url" in
+  https://api.telegram.org/*)
+    printf '%s\n' "$url" >> "$GUARD_TEST_TMP/telegram.calls"
+    ;;
+esac
+case "$url" in
   "$BEGET_API"/dns/getData)
     if [ -f "$GUARD_TEST_TMP/dns.auth" ]; then
       printf '%s\n' '{"status":"error","error_text":"auth","error_code":"AUTH_ERROR"}'
@@ -174,6 +179,7 @@ export GUARD_TEST_REAL_DATE="$REAL_DATE"
 export TG_BOT_TOKEN=test
 export TG_CHAT_ID=1
 export GUARD_REMINDER_SEC=3600
+export GUARD_FALL_N=2 GUARD_RISE_N=2
 unset GUARD_GW_ID GUARD_FORMS_URL GUARD_BALANCE_MIN GUARD_DEBOUNCE_SEC
 unset FALLBACK_PAGE_ID FALLBACK_BLOCK_ID FALLBACK_API_URL VIBE_API_URL VIBECODE_API_KEY
 
@@ -251,6 +257,7 @@ case4() { # outage reminders, one recovery, then a fresh immediate alert
 }
 
 fallback_setup() {
+  export GUARD_FALL_N=2 GUARD_RISE_N=2
   printf '100000\n' > "$tmp/clock"
   printf '000\n' > "$tmp/forms.code"
   printf 'unavailable\n' > "$tmp/forms.body"
@@ -282,7 +289,7 @@ case6() { # two failures publish outage once, further failures do not rewrite
   [ "$(api_count PATCH)" = 1 ] && [ "$(api_count POST)" = 1 ] && \
     cmp "$tmp/outage.html" "$tmp/published.html" && \
     jq -e '.fallback_mode == "outage" and .fallback_failures >= 2' "$tmp/state/state.json" >/dev/null && \
-    grep -q 'резервный канал' "$tmp/sent.log"
+    grep -q 'заявки принимает резерв' "$tmp/sent.log"
 }
 case7() { # one failed check never touches the API
   fallback_setup
@@ -299,7 +306,7 @@ case8() { # two successes restore normal, first success cannot switch
   [ "$(api_count PATCH)" = 2 ] && [ "$(api_count POST)" = 2 ] && \
     cmp "$tmp/normal.html" "$tmp/published.html" && \
     jq -e '.fallback_mode == "normal"' "$tmp/state/state.json" >/dev/null && \
-    grep -q 'стандартный блок' "$tmp/sent.log"
+    grep -q 'вернулись на основной' "$tmp/sent.log"
 }
 case9() { # read-back mismatch restores the exact previous draft, no publication
   fallback_setup
@@ -362,8 +369,8 @@ case14() { # transitions and API-key header bypass the six-hour default debounce
   run_guard; run_guard
   printf '302\n' > "$tmp/forms.code"
   run_guard; run_guard
-  [ "$(grep -c 'резервный канал' "$tmp/sent.log")" = 2 ] && \
-    [ "$(grep -c 'стандартный блок' "$tmp/sent.log")" = 2 ] && \
+  [ "$(grep -c 'заявки принимает резерв' "$tmp/sent.log")" = 2 ] && \
+    [ "$(grep -c 'вернулись на основной' "$tmp/sent.log")" = 2 ] && \
     ! grep -q 'synthetic-test-key' "$tmp/curl.argv.log" && \
     grep -qx 'X-API-Key: synthetic-test-key' "$tmp/api.header.log"
 }
@@ -397,6 +404,7 @@ case16() { # default snapshot comes from the script's repository directory
 }
 
 dns_setup() {
+  export GUARD_FALL_N=2 GUARD_RISE_N=2
   local name=$1
   local dns_tmp="$tmp/$name"
   rm -rf "$dns_tmp"
@@ -524,7 +532,7 @@ case24() { # DNS-only fallback enters outage without an unbound result
   chmod +x "$DNS_SWITCH"
   run_guard; run_guard
   jq -e '.fallback_mode == "outage"' "$tmp/state/state.json" >/dev/null && \
-    grep -q 'резервный канал' "$tmp/sent.log" && \
+    grep -q 'заявки принимает резерв' "$tmp/sent.log" && \
     grep -q 'sent fallback_outage' "$tmp/guard.log" && \
     ! grep -q 'unbound variable' "$tmp/guard.log"
 }
@@ -598,20 +606,28 @@ case30() { # foreign redirect does not request HTTPS
     ! grep -Fxq -- 'https://forms.arwox.ru/' "$GUARD_TEST_TMP/curl.argv.log"
 }
 
-case31() { # empty gateway DNS skips two checks without failover
+case31() { # two empty gateway DNS results switch to outage with legacy threshold
+  local first_pending
   export GUARD_TEST_TMP="$tmp"
   fallback_setup
   export GUARD_GW_HOST=gw.test
   export DNS_SWITCH="$tmp/dns-switch-stub.sh"
-  printf '#!/usr/bin/env bash\nprintf called > "$GUARD_TEST_TMP/dns-switch.called"\n' > "$DNS_SWITCH"
+  printf '#!/usr/bin/env bash\nprintf "called\\n" >> "$GUARD_TEST_TMP/dns-switch.called"\n' > "$DNS_SWITCH"
   chmod +x "$DNS_SWITCH"
   touch "$tmp/dig.empty"
   printf '{"fallback_mode":"normal","fallback_failures":0,"fallback_successes":0}\n' > "$GUARD_STATE_DIR/state.json"
+  rm -f "$tmp/dns-switch.called"
   out=$(bash "$GUARD" 2>&1); rc1=$?
+  first_pending=0
+  if [ ! -e "$tmp/dns-switch.called" ] &&
+     jq -e '.fallback_mode == "normal" and .fallback_failures == 1' "$GUARD_STATE_DIR/state.json" >/dev/null; then
+    first_pending=1
+  fi
   out2=$(bash "$GUARD" 2>&1); rc2=$?
-  if ! [ -e "$tmp/dns-switch.called" ] && [ "$rc1" = 0 ] && [ "$rc2" = 0 ] && \
+  if [ "$first_pending" = 1 ] && [ "$rc1" = 0 ] && [ "$rc2" = 0 ] && \
+    [ "$(wc -l < "$tmp/dns-switch.called")" = 1 ] && \
     printf '%s\n%s' "$out" "$out2" | grep -c 'check skip dns-empty' | grep -qx 2 && \
-    jq -e '.fallback_mode == "normal" and .fallback_failures == 0 and .fallback_successes == 0' "$GUARD_STATE_DIR/state.json" >/dev/null; then
+    jq -e '.fallback_mode == "outage" and .fallback_failures == 2 and .fallback_successes == 0' "$GUARD_STATE_DIR/state.json" >/dev/null; then
     rm -f "$tmp/dig.empty"
     unset GUARD_GW_HOST DNS_SWITCH
     return 0
@@ -640,13 +656,124 @@ case33() { # TLS certificate request is rate-limited for outage
   [ "$(wc -l < "$tmp/npm.calls")" = 1 ]
 }
 
-for i in {1..33}; do
+case34() { # flapping 000/302 for 60 runs: no DNS switch, no telegram
+  local i
+  snapshot_setup
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  export FALLBACK_PAGE_ID= FALLBACK_BLOCK_ID= DNS_SWITCH="$tmp/dns-flap.sh"
+  printf '#!/usr/bin/env bash\nprintf called >> "$GUARD_TEST_TMP/dns-flap.calls"\n' > "$DNS_SWITCH"
+  chmod +x "$DNS_SWITCH"
+  rm -f "$tmp/dns-flap.calls"
+  for i in $(seq 60); do
+    if [ $((i % 2)) = 0 ]; then printf '000\n' > "$tmp/forms.code"; else printf '302\n' > "$tmp/forms.code"; fi
+    run_guard
+  done
+  [ ! -e "$tmp/dns-flap.calls" ] && [ ! -s "$tmp/sent.log" ]
+}
+
+dns_success_setup() {
+  export FALLBACK_PAGE_ID= FALLBACK_BLOCK_ID= DNS_SWITCH="$tmp/dns-ok.sh"
+  printf '#!/usr/bin/env bash\nprintf "%%s %%s\\n" "$1" "$2" >> "$GUARD_TEST_TMP/dns-switch.calls"\n' > "$DNS_SWITCH"
+  chmod +x "$DNS_SWITCH"
+  : > "$tmp/dns-switch.calls"
+}
+
+case35() { # three hard failures: one DNS switch to outage, one message
+  snapshot_setup
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  dns_success_setup
+  run_guard; run_guard; run_guard
+  [ "$(grep -c '^apply outage$' "$tmp/dns-switch.calls")" = 1 ] && \
+    [ "$(grep -c 'сбой основного канала' "$tmp/sent.log")" = 1 ] && \
+    [ "$(wc -l < "$tmp/sent.log")" = 1 ] && \
+    jq -e '.fallback_mode == "outage"' "$tmp/state/state.json" >/dev/null
+}
+
+case36() { # return after 15 consecutive successes; failure at 10th resets the count
+  local i
+  snapshot_setup
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  dns_success_setup
+  run_guard; run_guard; run_guard
+  [ "$(grep -c '^apply outage$' "$tmp/dns-switch.calls")" = 1 ] && \
+    jq -e '.fallback_mode == "outage"' "$tmp/state/state.json" >/dev/null || return 1
+  jq '.form_outage_started_at=100000 | .form_outage_notified_at=100000' \
+    "$tmp/state/state.json" > "$tmp/state/state.json.tmp" || return 1
+  mv -f "$tmp/state/state.json.tmp" "$tmp/state/state.json" || return 1
+  printf '302\n' > "$tmp/forms.code"
+  run_guard
+  jq -e '.fallback_successes == 1 and (has("form_outage_started_at") | not) and (has("form_outage_notified_at") | not)' \
+    "$tmp/state/state.json" >/dev/null || return 1
+  for i in $(seq 13); do run_guard; done
+  [ "$(grep -c '^apply normal$' "$tmp/dns-switch.calls" || true)" = 0 ] && \
+    jq -e '.fallback_mode == "outage" and .fallback_successes == 14' "$tmp/state/state.json" >/dev/null || return 1
+  run_guard
+  [ "$(grep -c '^apply normal$' "$tmp/dns-switch.calls")" = 1 ] && \
+    [ "$(grep -c 'стабилен 15 мин' "$tmp/sent.log")" = 1 ] && \
+    [ "$(wc -l < "$tmp/sent.log")" = 2 ] && \
+    jq -e '.fallback_mode == "normal"' "$tmp/state/state.json" >/dev/null || return 1
+  printf '000\n' > "$tmp/forms.code"
+  run_guard; run_guard; run_guard
+  [ "$(grep -c '^apply outage$' "$tmp/dns-switch.calls")" = 2 ] && \
+    jq -e '.fallback_mode == "outage"' "$tmp/state/state.json" >/dev/null || return 1
+  printf '302\n' > "$tmp/forms.code"
+  for i in $(seq 9); do run_guard; done
+  jq -e '.fallback_mode == "outage" and .fallback_successes == 9' "$tmp/state/state.json" >/dev/null || return 1
+  printf '000\n' > "$tmp/forms.code"
+  run_guard
+  [ "$(grep -c '^apply normal$' "$tmp/dns-switch.calls")" = 1 ] && \
+    jq -e '.fallback_successes == 0 and .fallback_failures == 1' "$tmp/state/state.json" >/dev/null
+}
+
+case37() { # 404 counts as failure
+  snapshot_setup
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  dns_success_setup
+  printf '404\n' > "$tmp/forms.code"
+  run_guard; run_guard; run_guard
+  [ "$(grep -c '^apply outage$' "$tmp/dns-switch.calls")" = 1 ] && \
+    [ "$(wc -l < "$tmp/sent.log")" = 1 ] && \
+    ! grep -q 'отвечает <404>' "$tmp/sent.log" && \
+    jq -e '.fallback_mode == "outage"' "$tmp/state/state.json" >/dev/null
+}
+
+case38() { # GUARD_NOTIFY=0: switch happens, telegram not called
+  snapshot_setup
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  export GUARD_NOTIFY=0
+  export TG_BOT_TOKEN=t TG_CHAT_ID=c
+  : > "$tmp/telegram.calls"
+  dns_success_setup
+  run_guard; run_guard; run_guard
+  [ "$(grep -c '^apply outage$' "$tmp/dns-switch.calls")" = 1 ] && \
+    [ ! -s "$tmp/sent.log" ] && \
+    [ ! -s "$tmp/telegram.calls" ] && \
+    jq -e '.fallback_mode == "outage"' "$tmp/state/state.json" >/dev/null
+}
+
+case39() { # three empty gateway DNS results switch to outage once
+  local i rc=0
+  snapshot_setup
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  export GUARD_GW_HOST=gw.test FALLBACK_PAGE_ID= FALLBACK_BLOCK_ID= DNS_SWITCH="$tmp/dns-empty.sh"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$1 $2" >> "$GUARD_TEST_TMP/dns-empty.calls"\n' > "$DNS_SWITCH"
+  chmod +x "$DNS_SWITCH"
+  : > "$tmp/dns-empty.calls"
+  touch "$tmp/dig.empty"
+  for i in 1 2 3; do run_guard || rc=1; done
+  rm -f "$tmp/dig.empty"
+  unset GUARD_GW_HOST DNS_SWITCH
+  [ "$rc" = 0 ] && [ "$(grep -c '^apply outage$' "$tmp/dns-empty.calls")" = 1 ] && \
+    jq -e '.fallback_mode == "outage" and .fallback_failures == 3' "$tmp/state/state.json" >/dev/null
+}
+
+for i in {1..39}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/33\n' "$PASS"
+  printf 'PASS %d/39\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/33 (PASS %d/33)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/39 (PASS %d/39)\n' "$FAIL" "$PASS"
   exit 1
 fi
