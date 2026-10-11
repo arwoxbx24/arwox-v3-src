@@ -271,7 +271,7 @@ if [ "$stopped" = 1 ]; then
         log "resume issued"
         sleep 5
         check_form
-        [ "$dns_empty" = 1 ] && exit 0
+        [ "$dns_empty" = 1 ] && { fallback_track failed; exit 0; }
         if [ "$stopped" = 0 ]; then
           log "resume ok"
           notify gw_resumed "$code"
