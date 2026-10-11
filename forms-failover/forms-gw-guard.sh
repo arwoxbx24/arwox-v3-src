@@ -15,6 +15,10 @@ GUARD_BALANCE_MIN="${GUARD_BALANCE_MIN:-10}"
 GUARD_STATE_DIR="${GUARD_STATE_DIR:-/root/workspaces/tools/scripts/schedulers/state}"
 GUARD_DEBOUNCE_SEC="${GUARD_DEBOUNCE_SEC:-21600}"
 GUARD_REMINDER_SEC="${GUARD_REMINDER_SEC:-3600}"
+GUARD_FALL_N="${GUARD_FALL_N:-3}"
+GUARD_RISE_N="${GUARD_RISE_N:-15}"
+GUARD_NOTIFY="${GUARD_NOTIFY:-1}"
+[ "$GUARD_NOTIFY" = 0 ] && unset TG_BOT_TOKEN TG_CHAT_ID
 FALLBACK_SWITCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/forms-fallback-switch.sh"
 
 STATE_FILE="$GUARD_STATE_DIR/state.json"
@@ -37,6 +41,14 @@ notify() { # type text
   local type="$1" text="$2" now ts state json out msg started last elapsed
   text=$(printf '%s' "$text" | tr -d '"\r\n' | head -c 400)
   now=$(date +%s)
+  if [ -n "$DNS_SWITCH" ] && { [ "$type" = form_error ] || [ "$type" = form_recovered ]; }; then
+    log "notify $type suppressed (DNS_SWITCH)"
+    if [ "$type" = form_recovered ] && [ -f "$STATE_FILE" ]; then
+      json=$(jq 'del(.form_outage_started_at, .form_outage_notified_at)' "$STATE_FILE") &&
+        printf '%s\n' "$json" | state_write
+    fi
+    return 0
+  fi
   case "$type" in
     gw_resumed) msg="✅ $GUARD_FQDN: шлюз форм был остановлен (реапер YC) — поднят сторожем, форма отвечает <$2>." ;;
     low_balance) msg="💸 Баланс Yandex Cloud $2 ₽ (< $GUARD_BALANCE_MIN). Пополнить, иначе реапер остановит шлюз форм." ;;
@@ -184,12 +196,12 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
     failed)
       failures=$((failures + 1)); successes=0; target=outage
       state=$(echo "$state" | jq --argjson f "$failures" --argjson s "$successes" '.fallback_failures=$f | .fallback_successes=$s')
-      [ "$failures" -ge 2 ] && [ "$mode" != outage ] || { printf '%s\n' "$state" | state_write; return 0; }
+      [ "$failures" -ge "$GUARD_FALL_N" ] && [ "$mode" != outage ] || { printf '%s\n' "$state" | state_write; return 0; }
       ;;
     success)
       successes=$((successes + 1)); failures=0; target=normal
       state=$(echo "$state" | jq --argjson f "$failures" --argjson s "$successes" '.fallback_failures=$f | .fallback_successes=$s')
-      [ "$mode" = outage ] && [ "$successes" -ge 2 ] || { printf '%s\n' "$state" | state_write; return 0; }
+      [ "$mode" = outage ] && [ "$successes" -ge "$GUARD_RISE_N" ] || { printf '%s\n' "$state" | state_write; return 0; }
       ;;
     *) return 0 ;;
   esac
@@ -216,8 +228,8 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
   if [ "$rc" = 0 ]; then
     jq --arg mode "$target" '.fallback_mode=$mode | del(.dns_fail_snapshot)' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
     case "$target" in
-      outage) snapshot=$(incident_snapshot); notify fallback_outage "$GUARD_FQDN: включён резервный канал формы. Снимок: $snapshot" ;;
-      normal) notify fallback_normal "$GUARD_FQDN: восстановлен стандартный блок формы." ;;
+      outage) snapshot=$(incident_snapshot); notify fallback_outage "$GUARD_FQDN: сбой основного канала, заявки принимает резерв. Снимок: $snapshot" ;;
+      normal) notify fallback_normal "$GUARD_FQDN: основной канал стабилен $GUARD_RISE_N мин, вернулись на основной." ;;
     esac
   else
     case "$result" in
@@ -250,7 +262,7 @@ if ! flock -n 9; then
 fi
 
 check_form
-[ "$dns_empty" = 1 ] && exit 0
+[ "$dns_empty" = 1 ] && { fallback_track failed; exit 0; }
 if [ "$stopped" = 1 ]; then
   if out=$(yc serverless api-gateway get "$GUARD_GW_ID" --format json 2>&1); then
     status=$(printf '%s' "$out" | jq -r .status 2>/dev/null)
@@ -300,7 +312,9 @@ esac
 
 if [ "$failed" = 1 ] || [ "$form_error" = 1 ]; then
   fallback_track failed
-elif [ "$code" != "000" ] && [ "$stopped" = 0 ] && [ "$ssl" = 0 ]; then
+elif [ "${code:0:1}" = 4 ]; then
+  fallback_track failed
+elif [ "$stopped" = 0 ] && [ "$ssl" = 0 ] && { [ "${code:0:1}" = 2 ] || [ "${code:0:1}" = 3 ]; }; then
   fallback_track success
 fi
 
