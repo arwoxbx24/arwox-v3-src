@@ -144,7 +144,7 @@ check_form() { # sets code, ssl, stopped
   fi
   case "$code" in 2??|3??) ;; *)
     log evidence "code=$code time_total=${total:-0} body=$(LC_ALL=C head -c 200 "$BODY_FILE" 2>/dev/null | tr '\r\n\t' '   ')" ;; esac
-  if awk -v t="${total:-0}" 'BEGIN{exit !(t>10)}'; then
+  if [[ $code == [23]?? ]] && awk -v t="${total:-0}" 'BEGIN{exit !(t>10)}'; then # form_slow only for working 2xx/3xx; 000/5xx is outage (form_error)
     log "медленно" "code=$code time_total=$total"
     notify form_slow "$GUARD_FQDN: медленно (${total} с), HTTP $code"
   fi
