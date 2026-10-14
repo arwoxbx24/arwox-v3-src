@@ -116,8 +116,12 @@ def _captcha_ok(token, ip):
         with urllib.request.urlopen(req, timeout=5) as r:
             return "ok" if json.loads(r.read()).get("status") == "ok" else "fail"
     except urllib.error.HTTPError as e:
-        return "unavailable" if e.code >= 500 else "fail"
-    except Exception:
+        if e.code >= 500:
+            print(f"captcha_error=http{e.code}", flush=True)
+            return "unavailable"
+        return "fail"
+    except Exception as e:
+        print(f"captcha_error={type(e).__name__}:{getattr(e, 'reason', '')}", flush=True)
         return "unavailable"
 
 _TRANSIENT = ("QUERY_LIMIT_EXCEEDED", "OPERATION_TIME_LIMIT", "ERROR_CORE", "ACTION_FAILED")
