@@ -51,7 +51,16 @@ DNS `forms.arwox.ru` → A `45.139.76.176` (наш сервер) → NPM proxy h
 
 ## Известные дефекты (09.10)
 - Предпроверка `dns-switch.sh:73` отклоняет резерв с принудительным HTTPS (301) — исправление в атоме `dcfg-1ci20.14`.
-- Капчи на резерве нет (`SMARTCAPTCHA` в конфиге резерва — 0 упоминаний).
+- Historical defect (2026-10-09): the reserve had no SmartCaptcha keys; recovery and verification are specified in U1 below.
+
+## U1 — Reserve SmartCaptcha recovery
+
+- Owner outcome: the active reserve rejects missing, invalid, and unverified SmartCaptcha tokens before any Bitrix24 lead creation; valid submissions keep the consent, redirect, and reserve-queue contracts.
+- Architecture: both form hosts reach `forms-backup`, whose `server.py` imports the shared `index.py`; the protected reserve environment supplies the existing Yandex Cloud SmartCaptcha key pair. No DNS change is part of U1.
+- Incident evidence: on 2026-10-14 the reserve process lacked both keys; after their restoration a missing-token POST returned the widget, but a transient validator failure allowed an invalid-token POST and created marked test lead 3218. The shared `_captcha_ok` exception path was fail-open.
+- Ordered implementation: restore the official key pair to the reserve environment; make the shared validator exception path fail closed in `index.py`; run syntax and existing handler tests, isolated real-handler checks for missing token, invalid token, and validator outage; then verify a valid-token submission and live no-token gate before local delivery.
+- Local acceptance before `ship-post --submit`: the existing `test_lead.py` and `server-test.py` checks pass, and `git diff --check` is clean. The seven labeled goal checks remain required after merge, live checkout sync, and `forms-backup` reload; a local code pass does not prove live activation.
+- Rollback: revert only U1's source change through the normal Git route; the protected-config operator removes only the two added CAPTCHA key lines and reloads `forms-backup` if recovery must be undone. Preserve the lead queue and DNS state.
 
 ## Стратегия проверок (задаётся до кода, не по ходу)
 Три уровня, каждый пишется один раз и гоняется один раз на атом:

@@ -104,17 +104,18 @@ def _captcha_page(params, error=False):
 
 
 def _captcha_ok(token, ip):
-    """Серверная проверка токена SmartCaptcha. Нет секрета → капча выключена (пропускаем).
-    Сервис недоступен → не терять валидного клиента (пропускаем); ботов ловим на этапе «нет токена»."""
-    if not CAPTCHA_SECRET:
-        return True
+    """Серверная проверка токена SmartCaptcha.
+    U1 fail-closed: гейт обязателен — без конфигурации ключей токен не пропускаем,
+    любая ошибка проверки (сеть/JSON/HTTP) → тоже не пропускаем."""
+    if not (CAPTCHA_SITEKEY and CAPTCHA_SECRET):
+        return False
     try:
         data = urllib.parse.urlencode({"secret": CAPTCHA_SECRET, "token": token, "ip": ip}).encode()
         req = urllib.request.Request("https://smartcaptcha.yandexcloud.net/validate", data=data)
         with urllib.request.urlopen(req, timeout=5) as r:
             return json.loads(r.read()).get("status") == "ok"
     except Exception:
-        return True
+        return False
 
 _TRANSIENT = ("QUERY_LIMIT_EXCEEDED", "OPERATION_TIME_LIMIT", "ERROR_CORE", "ACTION_FAILED")
 
@@ -371,16 +372,17 @@ def handler(event, context):
     if ref_origin == urllib.parse.urlsplit(SELF_URL).netloc:
         ref_origin = ""
 
-    # SCAP-1 анти-спам: нет валидного токена капчи → отдаём капча-страницу (бот дальше не пройдёт,
-    # прямой POST на функцию без токена тоже упирается сюда). Токен есть → проверяем на сервере Яндекса.
-    if CAPTCHA_SECRET:
-        token = get("smart-token")
-        if not token:
-            p["REF_ORIGIN"] = [ref_origin]
-            return _captcha_page(p)
-        if not _captcha_ok(token, consent.extract_request_context(event)["ip"]):
-            p["REF_ORIGIN"] = [ref_origin]
-            return _captcha_page(p, error=True)
+    # SCAP-1 анти-спам + U1 fail-closed: капча обязательна для каждого лида. Без пары ключей
+    # SmartCaptcha заявка дальше не идёт (ни CRM, ни очереди); отдаём лендинг с ошибкой сервера.
+    if not (CAPTCHA_SITEKEY and CAPTCHA_SECRET):
+        return _redirect("?err=server#contact")
+    token = get("smart-token")
+    if not token:
+        p["REF_ORIGIN"] = [ref_origin]
+        return _captcha_page(p)
+    if not _captcha_ok(token, consent.extract_request_context(event)["ip"]):
+        p["REF_ORIGIN"] = [ref_origin]
+        return _captcha_page(p, error=True)
 
     tools = [t.strip() for t in p.get("TOOLS", []) if t.strip()]
     company = get("COMPANY")

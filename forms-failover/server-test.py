@@ -72,6 +72,8 @@ with tempfile.TemporaryDirectory() as temp:
 NOTE = "Форма была отправлена во время сбоя при резервном переключении"
 os.environ["FORMS_HANDLER_DIR"] = str(ROOT.parent / "site78-releases/2026-07-29/backend-arwox-lead-form")
 os.environ["WEBHOOK_URL"] = "https://example.invalid/rest/1/x"
+os.environ["SMARTCAPTCHA_SITEKEY"] = "test-sitekey-dummy"
+os.environ["SMARTCAPTCHA_SECRET"] = "test-secret-dummy"
 os.environ.pop("LEAD_FAILOVER_NOTE", None)
 os.environ.pop("LEAD_SPOOL_DIR", None)
 import server  # noqa: E402
@@ -82,6 +84,8 @@ assert spool_thread.daemon
 
 calls = {}
 
+TOKEN = "test-smart-token-fixture"
+
 
 def fake_call(method, fields, **_):
     calls[method] = fields
@@ -89,13 +93,15 @@ def fake_call(method, fields, **_):
 
 
 server.index.call_b24 = fake_call
+server.index._captcha_ok = lambda token, ip: token == TOKEN
 
 
 def submit():
     calls.clear()
     server.index.handler({
         "httpMethod": "POST",
-        "body": "NAME=Ivan&PHONE=%2B79001112233&CONSENT=1&COMMENTS=%D0%9C%D0%B0%D1%80%D0%BA%D0%B5%D1%80+%D1%84%D0%BE%D1%80%D0%BC%D1%8B",
+        "body": f"NAME=Ivan&PHONE=%2B79001112233&CONSENT=1&smart-token={TOKEN}"
+                "&COMMENTS=%D0%9C%D0%B0%D1%80%D0%BA%D0%B5%D1%80+%D1%84%D0%BE%D1%80%D0%BC%D1%8B",
         "isBase64Encoded": False,
     }, None)
     return calls["crm.lead.add"]["fields[COMMENTS]"]
@@ -114,7 +120,7 @@ def lead_event():
     return {
         "httpMethod": "POST",
         "headers": {"X-Real-Remote-Address": "203.0.113.9", "User-Agent": "spool-test"},
-        "body": "NAME=Ivan&PHONE=%2B79001112233&CONSENT=1&COMMENTS=queue-test",
+        "body": f"NAME=Ivan&PHONE=%2B79001112233&CONSENT=1&smart-token={TOKEN}&COMMENTS=queue-test",
         "isBase64Encoded": False,
     }
 
