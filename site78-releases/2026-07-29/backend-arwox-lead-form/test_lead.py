@@ -312,4 +312,15 @@ try:
 finally:
     restore_urlopen()
 
+# 12. Капча-страница постит токен обратно на URL, который её отдал: action="",
+#     никакого functions.yandexcloud.net (резерв/API Gateway/прямой URL — любой хост).
+calls.clear()
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    r = index.handler(ev([("NAME", "Мария"), ("PHONE", "+79001112233"), ("CONSENT", "1")]), None)
+assert r["statusCode"] == 200 and 'action=""' in r["body"], r
+assert "functions.yandexcloud.net" not in r["body"], r
+assert "captcha=page" in stdout.getvalue(), stdout.getvalue()
+print(stdout.getvalue(), end="")
+
 print("PASS: все проверки прошли")
