@@ -237,7 +237,7 @@ for missing in ("CAPTCHA_SITEKEY", "CAPTCHA_SECRET"):
 # 8. U1: пустой secret не пропускает токен через _captcha_ok (раньше → True).
 index.CAPTCHA_SECRET = ""
 try:
-    assert index._captcha_ok("test-token", "203.0.113.5") is False, \
+    assert index._captcha_ok("test-token", "203.0.113.5") == "fail", \
         "пустой SMARTCAPTCHA_SECRET не должен пропускать токен"
 finally:
     index.CAPTCHA_SECRET = _SAVED[1]
@@ -260,5 +260,24 @@ finally:
     index._captcha_ok.__globals__["urllib"].request.urlopen = saved_urlopen
     for name in ("SMARTCAPTCHA_SITEKEY", "SMARTCAPTCHA_SECRET"):
         os.environ.pop(name, None)
+
+# 10. Validator недоступен (URLError) → лид всё равно создаётся, TITLE с префиксом.
+calls.clear()
+
+
+def _unavail_open(_req, **_kw):
+    raise urllib.error.URLError("collector unreachable")
+
+
+install_urlopen(_unavail_open)
+try:
+    r = index.handler(ev([("NAME", "Сбой Яндекса"), ("PHONE", "+79001112233"), ("CONSENT", "1"),
+                          ("smart-token", "tok")],
+                         headers={"X-Forwarded-For": "203.0.113.5"}), None)
+    assert r["statusCode"] == 302 and r["headers"]["Location"].endswith("?ok=1#sent"), r
+    assert len([k for k in calls if k == "crm.lead.add"]) == 1, calls
+    assert calls["crm.lead.add"]["fields[TITLE]"].startswith("[captcha-unverified] "), calls
+finally:
+    restore_urlopen()
 
 print("PASS: все проверки прошли")

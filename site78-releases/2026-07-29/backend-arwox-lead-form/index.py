@@ -105,17 +105,18 @@ def _captcha_page(params, error=False):
 
 def _captcha_ok(token, ip):
     """Серверная проверка токена SmartCaptcha.
-    U1 fail-closed: гейт обязателен — без конфигурации ключей токен не пропускаем,
-    любая ошибка проверки (сеть/JSON/HTTP) → тоже не пропускаем."""
+    Три состояния: 'ok' — пройдена; 'fail' — не пройдена или нет ключей (лид отклоняем);
+    'unavailable' — validator недоступен (сеть/таймаут/HTTP/не-JSON), лид проходит
+    с пометкой [captcha-unverified] в TITLE, чтобы заявки не терялись при сбое Яндекса."""
     if not (CAPTCHA_SITEKEY and CAPTCHA_SECRET):
-        return False
+        return "fail"
     try:
         data = urllib.parse.urlencode({"secret": CAPTCHA_SECRET, "token": token, "ip": ip}).encode()
         req = urllib.request.Request("https://smartcaptcha.yandexcloud.net/validate", data=data)
         with urllib.request.urlopen(req, timeout=5) as r:
-            return json.loads(r.read()).get("status") == "ok"
+            return "ok" if json.loads(r.read()).get("status") == "ok" else "fail"
     except Exception:
-        return False
+        return "unavailable"
 
 _TRANSIENT = ("QUERY_LIMIT_EXCEEDED", "OPERATION_TIME_LIMIT", "ERROR_CORE", "ACTION_FAILED")
 
@@ -380,9 +381,11 @@ def handler(event, context):
     if not token:
         p["REF_ORIGIN"] = [ref_origin]
         return _captcha_page(p)
-    if not _captcha_ok(token, consent.extract_request_context(event)["ip"]):
+    captcha_state = _captcha_ok(token, consent.extract_request_context(event)["ip"])
+    if captcha_state == "fail":
         p["REF_ORIGIN"] = [ref_origin]
         return _captcha_page(p, error=True)
+    captcha_prefix = "[captcha-unverified] " if captcha_state == "unavailable" else ""
 
     tools = [t.strip() for t in p.get("TOOLS", []) if t.strip()]
     company = get("COMPANY")
@@ -407,7 +410,7 @@ def handler(event, context):
     source_description = " | ".join(src_parts)
 
     fields = {
-        "fields[TITLE]": f"Заявка с лендинга ARWOX — {name or contact}",
+        "fields[TITLE]": f"{captcha_prefix}Заявка с лендинга ARWOX — {name or contact}",
         "fields[NAME]": name,
         "fields[SOURCE_ID]": "WEB",  # заявка с веб-сайта (для аналитики «сколько с сайта»)
         "fields[SOURCE_DESCRIPTION]": source_description,

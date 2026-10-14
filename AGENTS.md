@@ -40,3 +40,4 @@ Runtime проекта: `index.py`, `consent.py`, `forms-failover/*`. Их пр�
 - Порядок: тест `forms-test.arwox.ru` (`forms-ctl.sh test`) → проверка → боевой `forms.arwox.ru` (`forms-ctl.sh test --prod`) только словом владельца.
 - До правки сервиса: health-check, логи pm2, откат `dns-switch.sh apply normal`; очередь `/var/lib/forms-backup/spool` не удалять без бэкапа.
 - Проверки — три уровня `architecture.md` §«Стратегия проверок», каждый один раз на атом; живой тест — после зелёных 1–3.
+- Live acceptance never blocks delivery. Route to production: `ship-post --submit` → courier merge → `git-sync` fast-forwards `/root/workspaces/projects/arwox-v3-src` (pm2 `forms-backup` imports it) → `pm2 reload forms-backup` (ship-post does not reload) → live probe on `forms-test.arwox.ru`. Cloud Function: new version from merged `index.py`, previous version kept for rollback. Live checks are a separate child atom after delivery.
