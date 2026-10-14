@@ -4,6 +4,7 @@ import os
 import contextlib
 import io
 import tempfile
+import urllib.error
 import urllib.parse
 from pathlib import Path
 
@@ -36,10 +37,60 @@ def ev(pairs, headers=None):
     return e
 
 
+_CANON = "__CANON_URLOPEN__"
+
+
+def install_urlopen(fn):
+    """Замена urlopen в urllib.request и её откат: у модуля urllib один словарь
+    атрибутов (sys.modules["urllib.request"] is urllib.request), замена видна везде."""
+    g = index._captcha_ok.__globals__["urllib"].request
+    if not hasattr(g, _CANON):
+        setattr(g, _CANON, g.urlopen)
+    g.urlopen = fn
+
+
+def restore_urlopen():
+    """Возврат к каноническому urlopen, сохранённому install_urlopen."""
+    g = index._captcha_ok.__globals__["urllib"].request
+    if hasattr(g, _CANON):
+        g.urlopen = getattr(g, _CANON)
+        delattr(g, _CANON)
+
+
+# U1: капча обязательна в проде → все позитивные сценарии идут через гейт.
+# Ставим тестовую пару ключей и СИМУЛЯЦИЮ ответа validator (status=ok):
+# заглушка доказывает работу гейта-кода, но НЕ то, что капчу решил человек.
+_CAPTCHA_ENV = (("SMARTCAPTCHA_SITEKEY", "CAPTCHA_SITEKEY", "test-sitekey"),
+                ("SMARTCAPTCHA_SECRET", "CAPTCHA_SECRET", "test-secret"))
+_SAVED_CAPTCHA = (index.CAPTCHA_SITEKEY, index.CAPTCHA_SECRET)
+_SAVED_URLOPEN = index._captcha_ok.__globals__["urllib"].request.urlopen
+for _env, _attr, _val in _CAPTCHA_ENV:
+    os.environ[_env] = _val
+    setattr(index, _attr, _val)
+
+
+class _Ok:
+    """Минимальный контекст-менеджер ответа validate со status=ok."""
+
+    def __enter__(self):
+        return io.BytesIO(b'{"status": "ok"}')
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _ok_open(_req, **_kw):  # urlopen вызывается как urlopen(req, timeout=5)
+    return _Ok()
+
+
+install_urlopen(_ok_open)
+
+
 with tempfile.TemporaryDirectory() as temp:
     os.environ["LEAD_SPOOL_DIR"] = temp
     index.call_b24 = lambda method, *_args, **_kw: ({}, "transient") if method == "crm.lead.add" else {"result": 42}
-    response = index.handler(ev([("NAME", "Ivan"), ("PHONE", "+79001112233"), ("CONSENT", "1")]), None)
+    response = index.handler(ev([("NAME", "Иван"), ("PHONE", "+79001112233"), ("CONSENT", "1"),
+                                 ("smart-token", "tok")]), None)
     queued = next(Path(temp).glob("*.json"))
     assert response["headers"]["Location"].endswith("?ok=1#sent")
     assert index.B24_OUTCOME.value == f"queue:{queued.name}"
@@ -54,7 +105,7 @@ index.call_b24 = fake_call
 
 # 1. Без согласия — лид не создаётся, редирект на ошибку согласия.
 calls.clear()
-r = index.handler(ev([("NAME", "Ivan"), ("PHONE", "+79001112233")]), None)
+r = index.handler(ev([("NAME", "Ivan"), ("PHONE", "+79001112233"), ("smart-token", "tok")]), None)
 assert r["statusCode"] == 302 and "err=consent" in r["headers"]["Location"], r
 assert not calls, "ничего не должно вызываться без согласия"
 
@@ -65,7 +116,7 @@ r = index.handler(ev([
     ("TEAM_SIZE", "от 5 до 50"), ("TOOLS", "Битрикс24"), ("TOOLS", "1С"),
     ("LAUNCH", "в этом месяце"), ("INDUSTRY", "продажи"),
     ("COMPANY", "ООО Ромашка"), ("COMMENTS", "Нужна CRM и телефония"),
-    ("UTM_CONTENT", "full-quiz"),
+    ("UTM_CONTENT", "full-quiz"), ("smart-token", "tok-full-quiz"),
 ], headers={"Referer": "https://arwox.ru/", "X-Forwarded-For": "203.0.113.5"}), None)
 assert r["statusCode"] == 302 and r["headers"]["Location"].endswith("?ok=1#sent"), r
 f = calls["crm.lead.add"]
@@ -101,12 +152,12 @@ assert c["URL"] == "https://arwox.ru"
 for bad in ("12345", "abc", "8-916", "user@", "@mail.ru", "a b@c",
             "+1 234 567 8901", "89991", "12323231231"):
     calls.clear()
-    r = index.handler(ev([("NAME", "123"), ("PHONE", bad), ("CONSENT", "1")]), None)
+    r = index.handler(ev([("NAME", "123"), ("PHONE", bad), ("CONSENT", "1"), ("smart-token", "tok")]), None)
     assert r["statusCode"] == 302 and r["headers"]["Location"].endswith("?err=contact#lead-form"), (bad, r)
     assert not calls, bad
 for good in ("+7 (900) 111-22-33", "89001112233", "9991112233", "user@mail.ru"):
     calls.clear()
-    index.handler(ev([("NAME", "Иван"), ("PHONE", good), ("CONSENT", "1")],
+    index.handler(ev([("NAME", "Иван"), ("PHONE", good), ("CONSENT", "1"), ("smart-token", "tok")],
                      headers={"X-Forwarded-For": "203.0.113.9"}), None)
     assert "crm.lead.add" in calls, good
 
@@ -119,7 +170,7 @@ assert r["statusCode"] == 302 and not calls, r
 calls.clear()
 r = index.handler(ev([
     ("NAME", "Пётр"), ("PHONE", "+79005553311"), ("CONSENT", "1"), ("AGREE", "1"),
-    ("CONSENT_MAILING", "1"),
+    ("CONSENT_MAILING", "1"), ("smart-token", "tok"),
     ("UTM_CONTENT", "popup"), ("COMMENTS", "Быстрая заявка — попап"),
 ], headers={"X-Forwarded-For": "203.0.113.6"}), None)
 assert r["statusCode"] == 302 and r["headers"]["Location"].endswith("?ok=1#psent"), r
@@ -132,7 +183,7 @@ assert af["Согласие на рассылку"] == "Да" and af["Форма
 calls.clear()
 r = index.handler(ev([
     ("NAME", "Чек-лист (футер)"), ("PHONE", "user@mail.ru"), ("CONSENT", "1"),
-    ("UTM_CONTENT", "checklist"), ("COMMENTS", "Запрос: чек-лист"),
+    ("UTM_CONTENT", "checklist"), ("COMMENTS", "Запрос: чек-лист"), ("smart-token", "tok"),
 ], headers={"X-Forwarded-For": "203.0.113.7"}), None)
 f = calls["crm.lead.add"]
 assert f["fields[EMAIL][0][VALUE]"] == "user@mail.ru", f
@@ -143,11 +194,71 @@ assert af["E-mail"] == "user@mail.ru" and "Телефон" not in af
 # 6. Реферер сквозь капчу: заголовок со своего домена игнорируется, hidden REF_ORIGIN побеждает.
 calls.clear()
 r = index.handler(ev([
-    ("NAME", "Ольга"), ("PHONE", "+79001110000"), ("CONSENT", "1"),
+    ("NAME", "Ольга"), ("PHONE", "+79001110000"), ("CONSENT", "1"), ("smart-token", "tok"),
     ("UTM_CONTENT", "popup"), ("REF_ORIGIN", "arwox.ru"),
 ], headers={"Referer": "https://forms.arwox.ru/", "X-Forwarded-For": "203.0.113.8"}), None)
 assert "Реферер: arwox.ru" in calls["crm.lead.add"]["fields[SOURCE_DESCRIPTION]"]
 assert calls["crm.activity.add"]["fields"]["PROVIDER_PARAMS"]["FORM"]["LINK"] == "https://arwox.ru/"
 assert calls["userconsent.consent.add"]["URL"] == "https://arwox.ru"
+
+# 7. U1 fail-closed: нет sitekey ИЛИ нет secret → lead-путь закрыт: ни CRM, ни очереди.
+#    (Раньше handler вообще не входил в гейт CAPTCHA_SECRET, а _captcha_ok
+#    при пустом secret возвращала True — спам проходил без ключей.)
+_SAVED = (index.CAPTCHA_SITEKEY, index.CAPTCHA_SECRET)
+_runs_empty_secret = [0]
+
+
+def _fake_validate():
+    """Стаб urlopen для validate: «человек прошёл капчу» по требованию ТЗ."""
+    def _open(_req, _timeout):
+        _runs_empty_secret[0] += 1
+        raise AssertionError("urlopen вызван без конфигурации капчи")
+    return _open
+
+
+for missing in ("CAPTCHA_SITEKEY", "CAPTCHA_SECRET"):
+    calls.clear()
+    setattr(index, missing, "")
+    try:
+        if missing == "CAPTCHA_SITEKEY":
+            def _no_validate(_req, **_kw):  # validate не должен вызываться без конфига
+                _runs_empty_secret[0] += 1
+                raise AssertionError("urlopen вызван без конфигурации капчи")
+            install_urlopen(_no_validate)
+        r = index.handler(ev([("NAME", "Виктор"), ("PHONE", "+79001112233"), ("CONSENT", "1"),
+                              ("smart-token", "test-token")]), None)
+        assert r["statusCode"] == 302 and "?err=server" in r["headers"]["Location"], (missing, r)
+        assert not calls, f"{missing}: лид/очередь прошли без конфига капчи"
+    finally:
+        setattr(index, missing, _SAVED[0] if missing == "CAPTCHA_SITEKEY" else _SAVED[1])
+        if missing == "CAPTCHA_SITEKEY":
+            restore_urlopen()
+
+# 8. U1: пустой secret не пропускает токен через _captcha_ok (раньше → True).
+index.CAPTCHA_SECRET = ""
+try:
+    assert index._captcha_ok("test-token", "203.0.113.5") is False, \
+        "пустой SMARTCAPTCHA_SECRET не должен пропускать токен"
+finally:
+    index.CAPTCHA_SECRET = _SAVED[1]
+
+# 9. U1 позитив: настроенная капча с validator status=ok — заявка проходит как раньше.
+calls.clear()
+for name, val in (("SMARTCAPTCHA_SITEKEY", "sitekey-x"), ("SMARTCAPTCHA_SECRET", "secret-x")):
+    os.environ.setdefault(name, val)
+    setattr(index, name, val)
+saved_urlopen = index._captcha_ok.__globals__["urllib"].request.urlopen
+index._captcha_ok.__globals__["urllib"].request.urlopen = _ok_open
+try:
+    r = index.handler(ev([("NAME", "С позитивом"), ("PHONE", "+79001112233"), ("CONSENT", "1"),
+                          ("UTM_CONTENT", "popup"), ("REF_ORIGIN", "arwox.ru"),
+                          ("smart-token", "tok")],
+                         headers={"X-Forwarded-For": "203.0.113.5"}), None)
+    assert r["statusCode"] == 302 and r["headers"]["Location"].endswith("?ok=1#psent"), r
+    assert "crm.lead.add" in calls, "валидный токен должен доходить до CRM"
+finally:
+    index._captcha_ok.__globals__["urllib"].request.urlopen = saved_urlopen
+    for name in ("SMARTCAPTCHA_SITEKEY", "SMARTCAPTCHA_SECRET"):
+        os.environ.pop(name, None)
 
 print("PASS: все проверки прошли")
