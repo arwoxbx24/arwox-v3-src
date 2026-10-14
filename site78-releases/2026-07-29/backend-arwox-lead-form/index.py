@@ -57,7 +57,7 @@ width:100%;cursor:pointer}.e{color:#d33;font-size:13px;margin-bottom:12px}
 <p>Секундная проверка безопасности, ничего нажимать не нужно.</p></div>
 <div id="manual"><h2>Не удалось проверить автоматически</h2>
 <p>Нажмите кнопку — и заявка уйдёт менеджеру.</p></div>[[ERR]]
-<form method="POST" action="[[ACTION]]" id="f">[[HIDDEN]]
+<form method="POST" action="" id="f">[[HIDDEN]]
 <div id="cap"></div>
 <button type="button" id="retry" style="display:none" onclick="__capGo()">Отправить заявку</button></form></div>
 <script>
@@ -95,7 +95,6 @@ def _captcha_page(params, error=False):
                           % (html.escape(k, True), html.escape(v, True)))
     err = '<div class="e">Проверка не пройдена, попробуйте ещё раз.</div>' if error else ''
     body = (_CAPTCHA_HTML.replace("[[HIDDEN]]", "\n".join(hidden))
-            .replace("[[ACTION]]", html.escape(SELF_URL, True))
             .replace("[[SITEKEY]]", html.escape(CAPTCHA_SITEKEY, True))
             .replace("[[ERR]]", err))
     return {"statusCode": 200,
@@ -383,8 +382,10 @@ def handler(event, context):
     token = get("smart-token")
     if not token:
         p["REF_ORIGIN"] = [ref_origin]
+        print("captcha=page", flush=True)
         return _captcha_page(p)
     captcha_state = _captcha_ok(token, consent.extract_request_context(event)["ip"])
+    print(f"captcha={captcha_state}", flush=True)
     if captcha_state == "fail":
         p["REF_ORIGIN"] = [ref_origin]
         return _captcha_page(p, error=True)
