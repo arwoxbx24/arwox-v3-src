@@ -106,8 +106,9 @@ def _captcha_page(params, error=False):
 def _captcha_ok(token, ip):
     """Серверная проверка токена SmartCaptcha.
     Три состояния: 'ok' — пройдена; 'fail' — не пройдена или нет ключей (лид отклоняем);
-    'unavailable' — validator недоступен (сеть/таймаут/HTTP/не-JSON), лид проходит
-    с пометкой [captcha-unverified] в TITLE, чтобы заявки не терялись при сбое Яндекса."""
+    'unavailable' — validator недоступен (сеть/таймаут/HTTP 5xx/не-JSON), лид проходит
+    с пометкой [captcha-unverified] в TITLE, чтобы заявки не терялись при сбое Яндекса.
+    HTTP 4xx от validator — отказ капчи (спам-токен): 'fail', лид не проходит."""
     if not (CAPTCHA_SITEKEY and CAPTCHA_SECRET):
         return "fail"
     try:
@@ -115,6 +116,8 @@ def _captcha_ok(token, ip):
         req = urllib.request.Request("https://smartcaptcha.yandexcloud.net/validate", data=data)
         with urllib.request.urlopen(req, timeout=5) as r:
             return "ok" if json.loads(r.read()).get("status") == "ok" else "fail"
+    except urllib.error.HTTPError as e:
+        return "unavailable" if e.code >= 500 else "fail"
     except Exception:
         return "unavailable"
 

@@ -280,4 +280,36 @@ try:
 finally:
     restore_urlopen()
 
+# 11. U1: HTTP 4xx от validator — отказ капчи (спам-токен), НЕ недоступность:
+#     лид отклоняем — страница капчи с ошибкой, ни CRM, ни очереди.
+#     Сеть/таймаут/HTTP 5xx остаются недоступностью → 'unavailable'.
+calls.clear()
+
+
+def _reject_open(_req, **_kw):
+    raise urllib.error.HTTPError("https://smartcaptcha.yandexcloud.net/validate", 403,
+                                 "Forbidden", {}, None)
+
+
+install_urlopen(_reject_open)
+try:
+    r = index.handler(ev([("NAME", "Спам-токен"), ("PHONE", "+79001112233"), ("CONSENT", "1"),
+                          ("smart-token", "fc14-invalid-token")],
+                         headers={"X-Forwarded-For": "203.0.113.5"}), None)
+    assert r["statusCode"] == 200 and not calls, (r, calls)
+finally:
+    restore_urlopen()
+
+
+def _outage_open(_req, **_kw):
+    raise urllib.error.HTTPError("https://smartcaptcha.yandexcloud.net/validate", 503,
+                                 "Service Unavailable", {}, None)
+
+
+install_urlopen(_outage_open)
+try:
+    assert index._captcha_ok("tok", "203.0.113.5") == "unavailable", "HTTP 503 — недоступность"
+finally:
+    restore_urlopen()
+
 print("PASS: все проверки прошли")
