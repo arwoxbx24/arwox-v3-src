@@ -312,6 +312,20 @@ try:
 finally:
     restore_urlopen()
 
+
+def _dns_outage_open(_req, **_kw):
+    raise urllib.error.URLError("Name or service not known")
+
+
+install_urlopen(_dns_outage_open)
+try:
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        assert index._captcha_ok("tok", "203.0.113.5") == "unavailable", "URLError — недоступность"
+    assert "captcha_error=URLError:" in stdout.getvalue(), stdout.getvalue()
+finally:
+    restore_urlopen()
+
 # 12. Капча-страница постит токен обратно на URL, который её отдал: action="",
 #     никакого functions.yandexcloud.net (резерв/API Gateway/прямой URL — любой хост).
 calls.clear()
