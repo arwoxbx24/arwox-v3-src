@@ -285,6 +285,21 @@ yc_exit() { # $1 = rc of a `timeout 60 yc` call; 124 keeps the reserve testable 
   fi
   [ "$rc" = 0 ] || exit "$rc"
 }
+yc_verify_mutation() { # $1 = add|remove; $2 = rc of the (timeout 300) mutating call; return 0 only when the gateway is already in the target state (`yc serverless api-gateway add-domain` can run ~110 s)
+  local kind=$1 rc=$2 gateway=unknown gateway_json
+  [ "$rc" = 0 ] && return 0
+  gateway_json=$(timeout 60 yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json) || gateway_json=
+  if gateway=$(jq -r --arg fqdn "$FQDN" 'if ((.attached_domains // null) | type) == "array" then (if any(.attached_domains[]; .domain == $fqdn) then "attached" else "detached" end) else "unknown" end' <<< "$gateway_json") \
+     && [ "$gateway" = attached -o "$gateway" = detached ]; then :; else gateway=unknown; fi
+  if [ "$kind" = add ] && [ "$gateway" = attached ]; then
+    record yc-add "verified=attached after rc=$rc"
+    return 0
+  elif [ "$kind" = remove ] && [ "$gateway" = detached ]; then
+    record yc-remove "verified=detached after rc=$rc"
+    return 0
+  fi
+  return 1
+}
 openssl_notafter_days() {
   local end ts now
   end=$(openssl s_client -connect "$BEGET_IP:443" -servername "$FQDN" </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null) || true
@@ -344,9 +359,10 @@ case "$COMMAND" in
     yc_exit "$rc"
     domain_id=$(jq -r --arg fqdn "$FQDN" '.attached_domains[] | select(.domain == $fqdn) | .domain_id' <<< "$gateway" | tail -1)
     if [ -z "$domain_id" ] || [ "$domain_id" = null ]; then printf 'ℹ️ Сбой уже имитирован — сначала ./forms-ctl.sh restore\n'; exit 0; fi
-    record yc-remove "command=timeout 60 yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id <domain-id>"
-    if timeout 60 yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id "$domain_id"; then rc=0; else rc=$?; fi
+    record yc-remove "command=timeout 300 yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id <domain-id>"
+    if timeout 300 yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id "$domain_id"; then rc=0; else rc=$?; fi
     record yc-remove "rc=$rc"
+    if yc_verify_mutation remove "$rc"; then rc=0; fi
     yc_exit "$rc"
     started=$(date +%s)
     jq -cn --argjson started "$started" --arg at "$(date -u +%FT%TZ)" '{started:$started,at:$at}' > "$STATE"
@@ -397,9 +413,10 @@ case "$COMMAND" in
       yc_exit "$rc"
       certificate_id=$(jq -r --arg fqdn "$FQDN" '[.[] | select(.status == "ISSUED" and .domains == [$fqdn])] | last | .id // empty' <<< "$certificates")
       [ -n "$certificate_id" ] || { printf 'issued certificate not found\n' >&2; exit 1; }
-      record yc-add "command=timeout 60 yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain $FQDN --certificate-id <certificate-id>"
-      if timeout 60 yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain "$FQDN" --certificate-id "$certificate_id"; then rc=0; else rc=$?; fi
+      record yc-add "command=timeout 300 yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain $FQDN --certificate-id <certificate-id>"
+      if timeout 300 yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain "$FQDN" --certificate-id "$certificate_id"; then rc=0; else rc=$?; fi
       record yc-add "rc=$rc"
+      if yc_verify_mutation add "$rc"; then rc=0; fi
       yc_exit "$rc"
     fi
     started=$(jq -r '.started // empty' "$STATE" 2>/dev/null || true)
@@ -431,10 +448,17 @@ case "$COMMAND" in
       gate_main=skip
     fi
     rc=0
-    [ "$cert_days" -lt 7 ] && rc=1
+    cert_note=
+    if [ "$cert_days" -lt 7 ]; then
+      if [ "$cert_days" = -9999 ] || [ "$(dns_count "$BEGET_IP")" = 6 ]; then
+        rc=1
+      else
+        cert_note=' cert=expiring' # DNS on Yandex: LE renewal impossible — note only; on the reserve an expiring cert fails the probe
+      fi
+    fi
     case "$gate" in off|error) rc=1 ;; esac
     case "$gate_main" in off|error) rc=1 ;; esac
-    line=$(printf 'probe rc=%d gate=%s gate_main=%s cert_days=%s' "$rc" "$gate" "$gate_main" "$cert_days")
+    line=$(printf 'probe rc=%d gate=%s gate_main=%s cert_days=%s%s' "$rc" "$gate" "$gate_main" "$cert_days" "$cert_note")
     printf '%s\n' "$line"
     record probe "line=$line"
     [ "$rc" = 0 ] || telegram_send "forms reserve probe FAILED: $line"
