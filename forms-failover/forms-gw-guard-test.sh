@@ -901,7 +901,8 @@ case50() { # drill state file absent: fallback_outage text unchanged
   snapshot_setup
   export GUARD_FALL_N=3 GUARD_RISE_N=15
   dns_success_setup
-  unset GUARD_DRILL_STATE
+  export GUARD_DRILL_STATE="$tmp/drill/absent.json"
+  rm -f "$GUARD_DRILL_STATE"
   run_guard; run_guard; run_guard
   [ "$(grep -c 'сбой основного канала' "$tmp/sent.log")" = 1 ] && \
     [ "$(wc -l < "$tmp/sent.log")" = 1 ] && \
