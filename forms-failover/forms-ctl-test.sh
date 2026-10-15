@@ -417,9 +417,20 @@ case34() { # test: remove-domain timeout plus unreadable state fails instead of 
   ! grep -Fq 'verified=detached' "$TMP/run/state/demo.log"
 }
 
+case35() { # restore success removes the drill state file; restore failure keeps it
+  setup CNAME
+  printf '{"started":98800}\n' > "$TMP/run/state/demo-forms-test.arwox.ru.json"
+  out=$(run_demo restore 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] && grep -Fq '✅ Уже восстановлено' <<< "$out" && [ ! -e "$TMP/run/state/demo-forms-test.arwox.ru.json" ] || return 1
+  setup CNAME
+  printf '{"started":98800}\n' > "$TMP/run/state/demo-forms-test.arwox.ru.json"
+  out=$(DEMO_YC_FAIL=1 run_demo restore 2>"$TMP/err"); rc=$?
+  [ "$rc" = 1 ] && [ -e "$TMP/run/state/demo-forms-test.arwox.ru.json" ]
+}
+
 PASS=0
 FAIL=0
-for i in {1..34}; do
+for i in {1..35}; do
   if "case$i"; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); printf 'FAIL case %s\n' "$i"; fi
 done
-if [ "$FAIL" = 0 ]; then printf 'PASS %d/34\n' "$PASS"; else printf 'FAIL %d/34 (PASS %d/34)\n' "$FAIL" "$PASS"; exit 1; fi
+if [ "$FAIL" = 0 ]; then printf 'PASS %d/35\n' "$PASS"; else printf 'FAIL %d/35 (PASS %d/35)\n' "$FAIL" "$PASS"; exit 1; fi

@@ -431,6 +431,7 @@ case "$COMMAND" in
       wait_for "$GW" "$(date +%s)" '' '' 600
     fi
     record step-4 "gateway=$GW"
+    rm -f "$STATE"
     printf '4) Возврат на Яндекс: %s (всего %s мин)\n' "$(date -u +%T)" "$(elapsed_minutes "$started")"
     [ "$attached" = 0 ] || printf '✅ Уже восстановлено\n'
     ;;

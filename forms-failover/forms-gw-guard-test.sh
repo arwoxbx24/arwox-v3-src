@@ -883,13 +883,39 @@ case48() { # starting in outage without outage_class still recovers once
     grep -q 'recovered class=' "$tmp/guard.log"
 }
 
-for i in {1..48}; do
+case49() { # drill state file present: fallback_outage text is prefixed with УЧЕНИЯ:
+  snapshot_setup
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  dns_success_setup
+  export GUARD_DRILL_STATE="$tmp/drill/demo.json"
+  mkdir -p "$tmp/drill"
+  printf '{"started":true,"at":100000}\n' > "$GUARD_DRILL_STATE"
+  run_guard; run_guard; run_guard
+  [ "$(grep -c '^УЧЕНИЯ: ' "$tmp/sent.log")" = 1 ] && \
+    [ "$(wc -l < "$tmp/sent.log")" = 1 ] && \
+    grep -q '^УЧЕНИЯ: .*сбой основного канала' "$tmp/sent.log" && \
+    ! grep -q '^УЧЕНИЯ: УЧЕНИЯ: ' "$tmp/sent.log"
+}
+
+case50() { # drill state file absent: fallback_outage text unchanged
+  snapshot_setup
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  dns_success_setup
+  export GUARD_DRILL_STATE="$tmp/drill/absent.json"
+  rm -f "$GUARD_DRILL_STATE"
+  run_guard; run_guard; run_guard
+  [ "$(grep -c 'сбой основного канала' "$tmp/sent.log")" = 1 ] && \
+    [ "$(wc -l < "$tmp/sent.log")" = 1 ] && \
+    ! grep -q '^УЧЕНИЯ: ' "$tmp/sent.log"
+}
+
+for i in {1..50}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/48\n' "$PASS"
+  printf 'PASS %d/50\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/48 (PASS %d/48)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/50 (PASS %d/50)\n' "$FAIL" "$PASS"
   exit 1
 fi
