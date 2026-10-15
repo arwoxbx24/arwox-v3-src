@@ -5,12 +5,12 @@ DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 GW=${DNS_GW_CNAME:-d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net}
 BEGET_IP=${BEGET_IP:-45.139.76.176}
 export BEGET_IP
-usage() { printf 'usage: %s test [--prod] [--no-feed]\n       %s restore [--prod]\n       %s status [--prod]\n' "$0" "$0" "$0" >&2; }
+usage() { printf 'usage: %s test [--prod] [--no-feed]\n       %s restore [--prod]\n       %s status [--prod]\n       %s probe [--prod]\n       %s cert-sync [--prod]\n' "$0" "$0" "$0" "$0" "$0" >&2; }
 
 COMMAND=${1:-}
 case "$COMMAND" in
   -h|--help) usage; exit 0 ;;
-  test|restore|status) shift ;;
+  test|restore|status|probe|cert-sync) shift ;;
   *) usage; exit 64 ;;
 esac
 NO_FEED=0
@@ -38,6 +38,7 @@ else
   GUARD_ERR=${GUARD_ERR:-/root/.pm2/logs/forms-gw-guard-test-error.log}
 fi
 BACKUP_LOG=${BACKUP_LOG:-/root/.pm2/logs/forms-backup-out.log}
+NPM_SSL_SCRIPT=${NPM_SSL_SCRIPT:-/root/workspaces/tools/acc1-scripts/actions/npm_ssl_request.sh}
 
 STEP_1='Сбой Яндекса имитирован'
 STEP_2='Сторож заметил сбой'
@@ -276,6 +277,52 @@ wait_for_certificate() {
   done
 }
 
+yc_exit() { # $1 = rc of a `timeout 60 yc` call; 124 keeps the reserve testable through `probe`
+  local rc=$1
+  if [ "$rc" = 124 ]; then
+    printf '❌ Yandex Cloud API не ответил за 60 с — тест сбоя невозможен; состояние резерва: ./forms-ctl.sh probe --prod\n' >&2
+    rc=1
+  fi
+  [ "$rc" = 0 ] || exit "$rc"
+}
+openssl_notafter_days() {
+  local end ts now
+  end=$(openssl s_client -connect "$BEGET_IP:443" -servername "$FQDN" </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null) || true
+  end=${end#notAfter=}
+  [ -n "$end" ] || return 1
+  if ! ts=$(date -d "$end" +%s 2>/dev/null); then return 1; fi
+  now=$(date +%s)
+  printf '%s\n' $(( (ts - now) / 86400 ))
+}
+telegram_send() { # token/chat reach the API only through stdin (`curl -K -`), never on the command line
+  local text=$1
+  [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_CHAT_ID:-}" ] || return 0
+  curl -s --max-time 30 -K - >/dev/null 2>&1 <<EOF || true
+url = "https://api.telegram.org/bot$TG_BOT_TOKEN/sendMessage"
+request = "POST"
+data = "chat_id=$TG_CHAT_ID&text=${text// /%20}"
+EOF
+}
+probe_gate() { # $1 = reserve|main ; prints on|off|error
+  local which=$1 post=( -sS --max-time 20 -X POST ) body response code status rc=0
+  response=$(mktemp "$DIR/state/probe.XXXXXX")
+  post+=( -o "$response" -w '%{http_code}' )
+  if [ "$which" = reserve ]; then post+=( -k --resolve "$FQDN:443:$BEGET_IP" ); fi
+  record gate-post "route=$which"
+  if body=$(curl "${post[@]}" "https://$FQDN/" \
+      --data-urlencode 'NAME=ТЕСТ forms-ctl probe' --data-urlencode 'PHONE=+70000000000' \
+      -d 'CONSENT=Y&smart-token=probe'); then rc=0; else rc=$?; fi
+  code=${body%% *}
+  if [ "$rc" != 0 ]; then status=error
+  elif [ "$code" = 200 ] && grep -q 'smartcaptcha.yandexcloud.net/captcha.js' "$response"; then status=on
+  elif [ "$code" = 302 ]; then status=off
+  else status=error
+  fi
+  rm -f "$response"
+  record gate "route=$which code=${code:-000} result=$status"
+  printf '%s\n' "$status"
+}
+
 case "$COMMAND" in
   status)
     record dns-status "command=dns-switch.sh status --fqdn $FQDN"
@@ -291,16 +338,16 @@ case "$COMMAND" in
     backup_log_start=0
     [ -r "$BACKUP_LOG" ] && backup_log_start=$(wc -l < "$BACKUP_LOG")
     snapshot_guard_errors
-    record yc-get "command=yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json"
-    if gateway=$(yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json); then rc=0; else rc=$?; fi
+    record yc-get "command=timeout 60 yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json"
+    if gateway=$(timeout 60 yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json); then rc=0; else rc=$?; fi
     record yc-get "rc=$rc"
-    [ "$rc" = 0 ] || exit "$rc"
+    yc_exit "$rc"
     domain_id=$(jq -r --arg fqdn "$FQDN" '.attached_domains[] | select(.domain == $fqdn) | .domain_id' <<< "$gateway" | tail -1)
     if [ -z "$domain_id" ] || [ "$domain_id" = null ]; then printf 'ℹ️ Сбой уже имитирован — сначала ./forms-ctl.sh restore\n'; exit 0; fi
-    record yc-remove "command=yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id <domain-id>"
-    if yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id "$domain_id"; then rc=0; else rc=$?; fi
+    record yc-remove "command=timeout 60 yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id <domain-id>"
+    if timeout 60 yc --profile default serverless api-gateway remove-domain d5dn462s09a9dpofvl2d --domain-id "$domain_id"; then rc=0; else rc=$?; fi
     record yc-remove "rc=$rc"
-    [ "$rc" = 0 ] || exit "$rc"
+    yc_exit "$rc"
     started=$(date +%s)
     jq -cn --argjson started "$started" --arg at "$(date -u +%FT%TZ)" '{started:$started,at:$at}' > "$STATE"
     record state "saved=$STATE started=$started"
@@ -336,24 +383,24 @@ case "$COMMAND" in
     guard_log_start=0
     [ -r "$GUARD_LOG" ] && guard_log_start=$(wc -l < "$GUARD_LOG")
     snapshot_guard_errors
-    record yc-get "command=yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json"
-    if gateway=$(yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json); then rc=0; else rc=$?; fi
+    record yc-get "command=timeout 60 yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json"
+    if gateway=$(timeout 60 yc --profile default serverless api-gateway get d5dn462s09a9dpofvl2d --format json); then rc=0; else rc=$?; fi
     record yc-get "rc=$rc"
-    [ "$rc" = 0 ] || exit "$rc"
+    yc_exit "$rc"
     attached=0
     if jq -e --arg fqdn "$FQDN" '.attached_domains[]? | select(.domain == $fqdn)' >/dev/null <<< "$gateway"; then
       attached=1
     else
-      record yc-certificate-list "command=yc --profile default certificate-manager certificate list --format json"
-      if certificates=$(yc --profile default certificate-manager certificate list --format json); then rc=0; else rc=$?; fi
+      record yc-certificate-list "command=timeout 60 yc --profile default certificate-manager certificate list --format json"
+      if certificates=$(timeout 60 yc --profile default certificate-manager certificate list --format json); then rc=0; else rc=$?; fi
       record yc-certificate-list "rc=$rc"
-      [ "$rc" = 0 ] || exit "$rc"
+      yc_exit "$rc"
       certificate_id=$(jq -r --arg fqdn "$FQDN" '[.[] | select(.status == "ISSUED" and .domains == [$fqdn])] | last | .id // empty' <<< "$certificates")
       [ -n "$certificate_id" ] || { printf 'issued certificate not found\n' >&2; exit 1; }
-      record yc-add "command=yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain $FQDN --certificate-id <certificate-id>"
-      if yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain "$FQDN" --certificate-id "$certificate_id"; then rc=0; else rc=$?; fi
+      record yc-add "command=timeout 60 yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain $FQDN --certificate-id <certificate-id>"
+      if timeout 60 yc --profile default serverless api-gateway add-domain d5dn462s09a9dpofvl2d --domain "$FQDN" --certificate-id "$certificate_id"; then rc=0; else rc=$?; fi
       record yc-add "rc=$rc"
-      [ "$rc" = 0 ] || exit "$rc"
+      yc_exit "$rc"
     fi
     started=$(jq -r '.started // empty' "$STATE" 2>/dev/null || true)
     started=${started:-$(date +%s)}
@@ -369,5 +416,50 @@ case "$COMMAND" in
     record step-4 "gateway=$GW"
     printf '4) Возврат на Яндекс: %s (всего %s мин)\n' "$(date -u +%T)" "$(elapsed_minutes "$started")"
     [ "$attached" = 0 ] || printf '✅ Уже восстановлено\n'
+    ;;
+  probe)
+    if days=$(openssl_notafter_days); then cert_days=$days; else cert_days=-9999; fi
+    record probe-cert "days=$cert_days"
+    vcode=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST https://smartcaptcha.yandexcloud.net/validate -d 'secret=probe&token=probe') || vcode=000
+    record validator "code=${vcode:-000}"
+    case "$vcode" in 200|4??) healthy=1 ;; *) healthy=0 ;; esac
+    if [ "$healthy" = 1 ]; then
+      gate=$(probe_gate reserve)
+      gate_main=$(probe_gate main)
+    else
+      gate=skip
+      gate_main=skip
+    fi
+    rc=0
+    [ "$cert_days" -lt 7 ] && rc=1
+    case "$gate" in off|error) rc=1 ;; esac
+    case "$gate_main" in off|error) rc=1 ;; esac
+    line=$(printf 'probe rc=%d gate=%s gate_main=%s cert_days=%s' "$rc" "$gate" "$gate_main" "$cert_days")
+    printf '%s\n' "$line"
+    record probe "line=$line"
+    [ "$rc" = 0 ] || telegram_send "forms reserve probe FAILED: $line"
+    exit "$rc"
+    ;;
+  cert-sync)
+    if days=$(openssl_notafter_days); then cert_days=$days; else cert_days=-9999; fi
+    dns=$(dns_count "$BEGET_IP")
+    record cert-sync-check "days=$cert_days dns=$dns"
+    action=none
+    rc=0
+    if [ "$cert_days" = -9999 ]; then
+      rc=1
+    elif [ "$cert_days" -le 30 ] && [ "$dns" = 6 ]; then
+      host_id=${NPM_HOST_ID:-}
+      if [ -z "$host_id" ]; then
+        if [ "$FQDN" = forms.arwox.ru ]; then host_id=40; else host_id=39; fi
+      fi
+      record npm-ssl "command=npm_ssl_request.sh proxy_host_id=$host_id"
+      if "$NPM_SSL_SCRIPT" "{\"proxy_host_id\":\"$host_id\"}"; then action=renewed; else action=failed; rc=1; fi
+    fi
+    line=$(printf 'cert_sync rc=%d days=%s action=%s' "$rc" "$cert_days" "$action")
+    printf '%s\n' "$line"
+    record cert-sync "line=$line"
+    [ "$rc" = 0 ] || telegram_send "forms reserve cert-sync FAILED: $line"
+    exit "$rc"
     ;;
 esac

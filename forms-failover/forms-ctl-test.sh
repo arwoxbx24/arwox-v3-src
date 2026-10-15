@@ -9,7 +9,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 setup() {
   rm -rf "$TMP/run"
-  rm -f "$TMP/guard-written" "$TMP/error-written" "$TMP/feed-written" "$TMP/timer-sleep" "$TMP/timer-release" "$TMP/dns-switch.args" "$TMP/post-normal-a-digs"
+  rm -f "$TMP/guard-written" "$TMP/error-written" "$TMP/feed-written" "$TMP/timer-sleep" "$TMP/timer-release" "$TMP/dns-switch.args" "$TMP/post-normal-a-digs" "$TMP/curl-post" "$TMP/telegram-call" "$TMP/npm-args"
   mkdir -p "$TMP/run/bin" "$TMP/run/state"
   cp "$DEMO" "$TMP/run/forms-ctl.sh"
   : > "$TMP/guard.out"
@@ -33,9 +33,17 @@ case "$*" in
        printf '%s\n' "$((post_normal_a_digs - 1))" > "$DEMO_TMP/post-normal-a-digs"
        printf '%s\n' "$BEGET_IP"
      else
-       case "$(cat "$DEMO_TMP/dns-mode")" in CNAME) printf '%s\n' "$DNS_GW_CNAME" ;; *) printf '%s\n' "$BEGET_IP" ;; esac
+       case "$(cat "$DEMO_TMP/dns-mode")" in CNAME) printf '%s\n' "$DNS_GW_CNAME" ;; E) printf '198.51.100.9\n' ;; *) printf '%s\n' "$BEGET_IP" ;; esac
      fi ;;
 esac
+EOF
+  cat > "$TMP/run/bin/openssl" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *s_client*) : ;;
+  *x509*) [ "${CERT_MISSING:-0}" = 1 ] && exit 1; clock=$(cat "$DEMO_TMP/clock"); printf 'notAfter=%s\n' "$(/bin/date -u -d "@$(( clock + ${CERT_DAYS:-20} * 86400 ))" '+%b %d %H:%M:%S %Y GMT')" ;;
+esac
+exit 0
 EOF
   cat > "$TMP/run/bin/flock" <<'EOF'
 #!/usr/bin/env bash
@@ -78,7 +86,7 @@ EOF
 printf '%s\n' "$*" >> "$DEMO_TMP/yc-args"
 fqdn=${FORMS_FQDN:-forms-test.arwox.ru}
 case "$*" in
-  *'api-gateway get'*) printf '{"attached_domains":[{"domain":"%s","domain_id":"%s-id"}]}\n' "$fqdn" "$fqdn" ;;
+  *'api-gateway get'*) [ "${DEMO_YC_FAIL:-0}" = 1 ] && exit 124; printf '{"attached_domains":[{"domain":"%s","domain_id":"%s-id"}]}\n' "$fqdn" "$fqdn" ;;
   *'api-gateway remove-domain'*) : ;;
   *'certificate-manager certificate list'*) printf '[{"status":"ISSUED","domains":["%s"],"id":"certificate-1"}]\n' "$fqdn" ;;
   *'api-gateway add-domain'*) : ;;
@@ -87,6 +95,7 @@ esac
 EOF
   cat > "$TMP/run/bin/curl" <<'EOF'
 #!/usr/bin/env bash
+case "$*" in *'-K -'*) printf 'telegram call\n' >> "$DEMO_TMP/telegram-call" ;; esac
 out= headers= method=GET resolve= url= prev= data=
 for arg in "$@"; do
   if [ -n "$prev" ]; then
@@ -96,6 +105,8 @@ for arg in "$@"; do
   case "$arg" in -o|-D|-X|--resolve|-w|--max-time) prev=$arg ;; -d) prev=data ;; -s|-sS) ;; http://*|https://*) url=$arg ;; esac
 done
 if [ "$method" = POST ]; then
+  printf 'post resolve=%s url=%s\n' "${resolve:-none}" "$url" >> "$DEMO_TMP/curl-post"
+  case "$url" in *smartcaptcha.yandexcloud.net/validate*) printf '%s\n' "${CURL_VALIDATOR_CODE:-200}"; exit 0 ;; esac
   [ -z "$data" ] || printf '%s\n' "$data" > "$DEMO_TMP/post-body"
   [ -z "$out" ] || printf '%s\n' "${CURL_POST_BODY:-<script src=\"smartcaptcha.yandexcloud.net/captcha.js\"></script>}" > "$out"
   if [ -n "$headers" ]; then
@@ -127,7 +138,12 @@ EOF
 printf '%s\n' "$*" > "$DEMO_TMP/timer-command"
 exec "$@"
 EOF
-  chmod +x "$TMP/run/bin/"* "$TMP/run/dns-switch.sh"
+  cat > "$TMP/npm-ssl-stub.sh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DEMO_TMP/npm-args"
+exit 0
+EOF
+  chmod +x "$TMP/run/bin/"* "$TMP/run/dns-switch.sh" "$TMP/npm-ssl-stub.sh"
 }
 
 run_demo() {
@@ -135,6 +151,7 @@ run_demo() {
   env PATH="$TMP/run/bin:$PATH" DEMO_TMP="$TMP" \
     GUARD_LOG="$TMP/guard.out" GUARD_ERR="$TMP/guard.err" \
     BACKUP_LOG="${BACKUP_LOG:-}" FEED_LOG_LINES="${FEED_LOG_LINES:-}" AUTO_RESTORE_SEC="${AUTO_RESTORE_SEC:-}" \
+    NPM_SSL_SCRIPT="$TMP/npm-ssl-stub.sh" TG_BOT_TOKEN="${TG_BOT_TOKEN:-}" TG_CHAT_ID="${TG_CHAT_ID:-}" \
     BEGET_IP=203.0.113.10 DNS_GW_CNAME=d5dn462s09a9dpofvl2d.6brbn2wz.apigw.yandexcloud.net \
     bash "$TMP/run/forms-ctl.sh" "$@"
 }
@@ -290,10 +307,62 @@ case21() { # unrelated spool completion is not a queued lead
   out=$(DEMO_FEED=1 DEMO_FEED_CLOCK=1 AUTO_RESTORE_SEC=2 BACKUP_LOG="$TMP/backup.out" FEED_LOG_LINES="$lines" run_demo test 2>"$TMP/err"); rc=$?
   [ "$rc" = 0 ] && ! grep -Fq 'Bitrix24 лид #77' <<< "$out"
 }
+case22() { # probe healthy validator + captcha page on both routes is green
+  setup A
+  out=$(run_demo probe 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] || return 1
+  grep -Eq '^probe rc=0 gate=on gate_main=on cert_days=-?[0-9]+$' <<< "$out" || return 1
+  grep -Fq 'resolve=forms-test.arwox.ru:443:203.0.113.10 url=https://forms-test.arwox.ru/' "$TMP/curl-post" || return 1
+  grep -Fq 'resolve=none url=https://forms-test.arwox.ru/' "$TMP/curl-post" || return 1
+}
+case23() { # validator down: gate is skipped and no POST reaches the reserve
+  setup A
+  out=$(CURL_VALIDATOR_CODE=503 run_demo probe 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] || return 1
+  grep -Eq '^probe rc=0 gate=skip gate_main=skip cert_days=-?[0-9]+$' <<< "$out" || return 1
+  grep -Fq 'url=https://smartcaptcha.yandexcloud.net/validate' "$TMP/curl-post" || return 1
+  if grep -Fq 'resolve=forms-test.arwox.ru' "$TMP/curl-post"; then return 1; fi
+  return 0
+}
+case24() { # reserve answers 302: probe fails and Telegram is notified
+  setup A
+  out=$(CURL_POST_CODE=302 TG_BOT_TOKEN=stub-bot TG_CHAT_ID=stub-chat run_demo probe 2>"$TMP/err"); rc=$?
+  [ "$rc" = 1 ] || return 1
+  grep -Eq '^probe rc=1 gate=off gate_main=off cert_days=-?[0-9]+$' <<< "$out" || return 1
+  grep -Fq 'telegram call' "$TMP/telegram-call" || return 1
+}
+case25() { # cert-sync renews when the cert is near expiry and DNS points to the reserve
+  setup A
+  out=$(run_demo cert-sync 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] || return 1
+  grep -Eq '^cert_sync rc=0 days=-?[0-9]+ action=renewed$' <<< "$out" || return 1
+  grep -Fq '{"proxy_host_id":"39"}' "$TMP/npm-args" || return 1
+}
+case26() { # cert-sync leaves renewal to the guard when DNS is not on the reserve
+  setup E
+  out=$(run_demo cert-sync 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] || return 1
+  grep -Eq '^cert_sync rc=0 days=-?[0-9]+ action=none$' <<< "$out" || return 1
+  if [ -f "$TMP/npm-args" ]; then return 1; fi
+  return 0
+}
+case27() { # missing certificate fails cert-sync and notifies Telegram
+  setup A
+  out=$(CERT_MISSING=1 TG_BOT_TOKEN=stub-bot TG_CHAT_ID=stub-chat run_demo cert-sync 2>"$TMP/err"); rc=$?
+  [ "$rc" = 1 ] || return 1
+  grep -Fq 'cert_sync rc=1 days=-9999 action=none' <<< "$out" || return 1
+  grep -Fq 'telegram call' "$TMP/telegram-call" || return 1
+}
+case28() { # yc hanging past timeout 60 stops the failure test with a probe hint
+  setup A
+  out=$(DEMO_YC_FAIL=1 run_demo test 2>"$TMP/err"); rc=$?
+  [ "$rc" = 1 ] || return 1
+  grep -Fq 'Yandex Cloud API не ответил за 60 с — тест сбоя невозможен; состояние резерва: ./forms-ctl.sh probe --prod' "$TMP/err" || return 1
+}
 
 PASS=0
 FAIL=0
-for i in {1..21}; do
+for i in {1..28}; do
   if "case$i"; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); printf 'FAIL case %s\n' "$i"; fi
 done
-if [ "$FAIL" = 0 ]; then printf 'PASS %d/21\n' "$PASS"; else printf 'FAIL %d/21 (PASS %d/21)\n' "$FAIL" "$PASS"; exit 1; fi
+if [ "$FAIL" = 0 ]; then printf 'PASS %d/28\n' "$PASS"; else printf 'FAIL %d/28 (PASS %d/28)\n' "$FAIL" "$PASS"; exit 1; fi
