@@ -9,13 +9,14 @@ trap 'rm -rf "$TMP"' EXIT
 
 setup() {
   rm -rf "$TMP/run"
-  rm -f "$TMP/guard-written" "$TMP/error-written" "$TMP/feed-written" "$TMP/timer-sleep" "$TMP/timer-release" "$TMP/dns-switch.args" "$TMP/post-normal-a-digs" "$TMP/curl-post" "$TMP/telegram-call" "$TMP/npm-args"
+  rm -f "$TMP/guard-written" "$TMP/error-written" "$TMP/feed-written" "$TMP/timer-sleep" "$TMP/timer-release" "$TMP/dns-switch.args" "$TMP/post-normal-a-digs" "$TMP/curl-post" "$TMP/telegram-call" "$TMP/npm-args" "$TMP/yc-get-attached" "$TMP/yc-mutated"
   mkdir -p "$TMP/run/bin" "$TMP/run/state"
   cp "$DEMO" "$TMP/run/forms-ctl.sh"
   : > "$TMP/guard.out"
   : > "$TMP/guard.err"
   : > "$TMP/dns-switch.args"
   printf '100000\n' > "$TMP/clock"
+  : > "$TMP/telegram-call"
   printf '%s\n' "${1:-A}" > "$TMP/dns-mode"
   printf '0\n' > "$TMP/cert-failures"
 
@@ -86,10 +87,27 @@ EOF
 printf '%s\n' "$*" >> "$DEMO_TMP/yc-args"
 fqdn=${FORMS_FQDN:-forms-test.arwox.ru}
 case "$*" in
-  *'api-gateway get'*) [ "${DEMO_YC_FAIL:-0}" = 1 ] && exit 124; printf '{"attached_domains":[{"domain":"%s","domain_id":"%s-id"}]}\n' "$fqdn" "$fqdn" ;;
-  *'api-gateway remove-domain'*) : ;;
+  *'api-gateway get'*)
+    [ "${DEMO_YC_FAIL:-0}" = 1 ] && exit 124
+    if [ "${DEMO_YC_GET_FAIL_AFTER_MUTATION:-0}" = 1 ] && [ -e "$DEMO_TMP/yc-mutated" ]; then exit 1; fi
+    attached=${DEMO_YC_GET_ATTACHED:-1}
+    [ -r "$DEMO_TMP/yc-get-attached" ] && attached=$(cat "$DEMO_TMP/yc-get-attached")
+    if [ "$attached" = 1 ]; then
+      printf '{"attached_domains":[{"domain":"%s","domain_id":"%s-id"}]}\n' "$fqdn" "$fqdn"
+    else
+      printf '{"attached_domains":[]}\n'
+    fi ;;
+  *'api-gateway remove-domain'*)
+    : > "$DEMO_TMP/yc-mutated"
+    printf '%s\n' "${DEMO_YC_GET_ATTACHED_AFTER:-1}" > "$DEMO_TMP/yc-get-attached"
+    [ "${DEMO_YC_REMOVE_124:-0}" = 1 ] && exit 124
+    : ;;
   *'certificate-manager certificate list'*) printf '[{"status":"ISSUED","domains":["%s"],"id":"certificate-1"}]\n' "$fqdn" ;;
-  *'api-gateway add-domain'*) : ;;
+  *'api-gateway add-domain'*)
+    : > "$DEMO_TMP/yc-mutated"
+    printf '%s\n' "${DEMO_YC_GET_ATTACHED_AFTER:-1}" > "$DEMO_TMP/yc-get-attached"
+    [ "${DEMO_YC_ADD_124:-0}" = 1 ] && exit 124
+    : ;;
   *) exit 1 ;;
 esac
 EOF
@@ -360,9 +378,48 @@ case28() { # yc hanging past timeout 60 stops the failure test with a probe hint
   grep -Fq 'Yandex Cloud API не ответил за 60 с — тест сбоя невозможен; состояние резерва: ./forms-ctl.sh probe --prod' "$TMP/err" || return 1
 }
 
+case29() { # restore: add-domain hitting the timeout is fine when the domain is already attached
+  setup CNAME
+  out=$(DEMO_YC_GET_ATTACHED=0 DEMO_YC_GET_ATTACHED_AFTER=1 DEMO_YC_ADD_124=1 run_demo restore 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] || return 1
+  grep -Fq 'yc-add verified=attached after rc=124' "$TMP/run/state/demo.log"
+}
+case30() { # restore: add-domain timeout without server-side attach keeps failing
+  setup CNAME
+  out=$(DEMO_YC_GET_ATTACHED=0 DEMO_YC_GET_ATTACHED_AFTER=0 DEMO_YC_ADD_124=1 run_demo restore 2>"$TMP/err"); rc=$?
+  [ "$rc" = 1 ] || return 1
+  grep -Fq 'Yandex Cloud API не ответил за 60 с' "$TMP/err"
+}
+case31() { # test: remove-domain timeout is fine when the domain is already detached
+  setup A
+  out=$(DEMO_YC_GET_ATTACHED_AFTER=0 DEMO_YC_REMOVE_124=1 run_demo test 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] || return 1
+  grep -Fq '🏁 Тест пройден: 5/5' <<< "$out"
+}
+case32() { # probe: cert expiring but DNS not on the reserve is not actionable
+  setup E
+  out=$(CERT_DAYS=5 run_demo probe 2>"$TMP/err"); rc=$?
+  [ "$rc" = 0 ] || return 1
+  grep -Fq 'probe rc=0 gate=on gate_main=on cert_days=5 cert=expiring' <<< "$out" || return 1
+  [ -f "$TMP/telegram-call" ] && ! [ -s "$TMP/telegram-call" ]
+}
+case33() { # probe: cert expiring while DNS is on the reserve fails and notifies Telegram
+  setup A
+  out=$(CERT_DAYS=5 TG_BOT_TOKEN=stub-bot TG_CHAT_ID=stub-chat run_demo probe 2>"$TMP/err"); rc=$?
+  [ "$rc" = 1 ] || return 1
+  grep -Fq 'probe rc=1 gate=on gate_main=on cert_days=5' <<< "$out" && grep -Fq 'telegram call' "$TMP/telegram-call"
+}
+
+case34() { # test: remove-domain timeout plus unreadable state fails instead of verified=detached
+  setup A
+  out=$(DEMO_YC_GET_ATTACHED_AFTER=0 DEMO_YC_REMOVE_124=1 DEMO_YC_GET_FAIL_AFTER_MUTATION=1 run_demo test 2>"$TMP/err"); rc=$?
+  [ "$rc" -ne 0 ] || return 1
+  ! grep -Fq 'verified=detached' "$TMP/run/state/demo.log"
+}
+
 PASS=0
 FAIL=0
-for i in {1..28}; do
+for i in {1..34}; do
   if "case$i"; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); printf 'FAIL case %s\n' "$i"; fi
 done
-if [ "$FAIL" = 0 ]; then printf 'PASS %d/28\n' "$PASS"; else printf 'FAIL %d/28 (PASS %d/28)\n' "$FAIL" "$PASS"; exit 1; fi
+if [ "$FAIL" = 0 ]; then printf 'PASS %d/34\n' "$PASS"; else printf 'FAIL %d/34 (PASS %d/34)\n' "$FAIL" "$PASS"; exit 1; fi
