@@ -17,7 +17,13 @@ DNS `forms.arwox.ru` → A `45.139.76.176` (наш сервер) → NPM proxy h
 - На Яндексе у нас только serverless: API Gateway `arwox-forms-gw` и одна Cloud Function, ВМ и дисков нет. Ручное управление квотами на ВМ и диски (письмо Яндекса 11.10) схему заявок не задевает: она не создаёт новых ресурсов.
 - Посмотреть квоты: `yc quota-manager quota-limit list` / `get` (https://yandex.cloud/ru/docs/cli/release-notes); точные флаги — `--help` перед вызовом.
 - Увеличить квоту: `yc quota-manager quota-request create` / `get` или REST `QuotaRequest` Create (https://yandex.cloud/ru/docs/quota-manager/quickstart), либо техподдержка. Квоту можно изменить по запросу, лимит — нельзя (https://yandex.cloud/ru/docs/compute/concepts/limits).
-- Инцидент 11.10: по письму Яндекса недоступна зона ru-central1-b; шлюз не отвечает с 01:50Z 11.10 (TCP timeout, `dcfg-jcwf2`), заявки принимает резерв. Связь отказа шлюза с этой зоной — UNVERIFIED: зона шлюза не проверялась.
+- History, incident 11.10–15.10: Yandex letter reported zone ru-central1-b down; the gateway did not answer from 01:50Z 11.10 (TCP timeout, `dcfg-jcwf2`, `dcfg-k2yg3`), the reserve took leads. Link of the gateway failure to that zone — UNVERIFIED.
+
+## State 2026-10-15
+- Owner rule: Yandex (API Gateway → Cloud Function) is the default route; the reserve takes leads only while Yandex is broken. `forms-gw-guard` switches DNS to the reserve on outage and back to Yandex on recovery by itself.
+- 15.10 19:13Z: Yandex recovered, guard failed back. `forms-ctl.sh status --prod` → `dns=normal yandex=HTTP 302 backup=HTTP 301`; guard log `class=ok`, `balance <number> active=true`; `yc serverless api-gateway list` answers, `arwox-forms-gw` ACTIVE. Closed: `dcfg-k2yg3`, `dcfg-1u6vj`.
+- SmartCaptcha fail-closed gate is on both routes (epic `dcfg-fm4p3`, PRs #33–#37); Cloud Function `$latest` rebuilt 14.10 from merged `index.py` (`fn-deploy.sh`, PR #38), rollback version `d4egc5urnmocbb7t720n`.
+- Open: prod live test `dcfg-1ci20.33` (owner phrase only), `forms-ctl.sh test` rc 1 when Yandex is down `dcfg-0p5lb`, review of `[captcha-unverified]` leads `dcfg-5e55i`, captcha hardening backlog `dcfg-qj6w1` (deferred).
 
 ## Части резерва (`forms-failover/`)
 | Файл | Роль |
