@@ -21,6 +21,7 @@ GUARD_YC_TIMEOUT="${GUARD_YC_TIMEOUT:-15}"
 GUARD_NOTIFY="${GUARD_NOTIFY:-1}"
 [ "$GUARD_NOTIFY" = 0 ] && unset TG_BOT_TOKEN TG_CHAT_ID
 FALLBACK_SWITCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/forms-fallback-switch.sh"
+GUARD_DRILL_STATE="${GUARD_DRILL_STATE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/state/demo-$GUARD_FQDN.json}"
 
 STATE_FILE="$GUARD_STATE_DIR/state.json"
 BODY_FILE="$GUARD_STATE_DIR/forms-gw-guard.body"
@@ -107,6 +108,7 @@ notify() { # type text
     log "telegram skipped $type"
     return 0
   fi
+  if [ -f "$GUARD_DRILL_STATE" ]; then msg="УЧЕНИЯ: $msg"; fi
   if out=$(printf 'url = "https://api.telegram.org/bot%s/sendMessage"\ndata = "chat_id=%s"\ndata-urlencode = "text=%s"\n' \
       "$TG_BOT_TOKEN" "$TG_CHAT_ID" "$msg" | curl -s --max-time 10 -K - 2>&1) && \
      printf '%s' "$out" | jq -e '.ok == true' >/dev/null 2>&1; then
