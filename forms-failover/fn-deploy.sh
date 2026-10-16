@@ -18,6 +18,12 @@ Usage: forms-failover/fn-deploy.sh --help | --dry-run | --rollback <version-id>
                          command with every env value masked as KEY=***; no API write.
   --rollback <version-id>
                          Move the $latest tag to <version-id>.
+  --target <function-id> Create the version on this function instead of the default
+                         one; settings/env still come from the default function's
+                         $latest. Requires --env WEBHOOK_URL=... (a test function
+                         must never send to the production CRM).
+  --env KEY=VALUE        Repeatable; replaces/adds this key in the copied env.
+                         Values are never printed (--dry-run shows KEY=***).
 EOF
 }
 
@@ -34,18 +40,33 @@ main() {
   need yc
   need jq
 
-  local dry=0
-  case "${1:-}" in
-    --rollback)
-      [[ $# -ge 2 ]] || { usage >&2; die "--rollback requires <version-id>"; }
-      yc serverless function version set-tag --id "$2" --tag '$latest'
-      echo "rollback latest=$2"
-      exit 0
-      ;;
-    --dry-run) dry=1; [[ $# -eq 1 ]] || die "--dry-run takes no arguments" ;;
-    "") [[ $# -eq 0 ]] || die "unexpected arguments" ;;
-    *) usage >&2; die "unknown argument: $1" ;;
-  esac
+  local dry=0 target_id="$FN_ID"
+  local -a env_over=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --rollback)
+        [[ $# -ge 2 ]] || { usage >&2; die "--rollback requires <version-id>"; }
+        yc serverless function version set-tag --id "$2" --tag '$latest'
+        echo "rollback latest=$2"
+        exit 0
+        ;;
+      --dry-run) dry=1; shift ;;
+      --target)
+        [[ $# -ge 2 ]] || { usage >&2; die "--target requires <function-id>"; }
+        target_id="$2"; shift 2 ;;
+      --env)
+        [[ $# -ge 2 ]] || { usage >&2; die "--env requires KEY=VALUE"; }
+        [[ "$2" == *=* ]] || die "--env expects KEY=VALUE"
+        env_over+=("$2"); shift 2 ;;
+      *) usage >&2; die "unknown argument: $1" ;;
+    esac
+  done
+
+  # A test function must never inherit the production CRM webhook.
+  local kv webhook_over=0
+  for kv in "${env_over[@]}"; do [[ "${kv%%=*}" == WEBHOOK_URL ]] && webhook_over=1; done
+  [[ "$target_id" == "$FN_ID" || "$webhook_over" == 1 ]] ||
+    die "--target $target_id without --env WEBHOOK_URL=... would reuse the production webhook; a test function must never send to the production CRM"
 
   local root src
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -75,8 +96,21 @@ main() {
   mapfile -d '' -t env_args < <(jq -j '(.environment // {}) | to_entries[] | "\(.key)=\(.value)\u0000"' <<<"$j")
   (( ${#env_args[@]} > 0 )) || die "tagged version has no environment"
 
+  # Apply --env overrides: replace existing keys, add new ones (no duplicates).
+  local -a eff_env=()
+  local seen="" ov skip
+  for kv in "${env_args[@]}"; do
+    skip=0
+    for ov in "${env_over[@]}"; do [[ "${ov%%=*}" == "${kv%%=*}" ]] && skip=1; done
+    [[ "$skip" == 1 ]] || eff_env+=("$kv")
+  done
+  for kv in "${env_over[@]}"; do
+    [[ ":$seen:" != *":${kv%%=*}:"* ]] && { eff_env+=("$kv"); seen+="${kv%%=*}:"; }
+  done
+  env_args=("${eff_env[@]}")
+
   local -a flags=(
-    --function-id "$FN_ID"
+    --function-id "$target_id"
     --runtime "$runtime"
     --entrypoint "$entrypoint"
     --memory "${mem_mb}MB"
@@ -108,7 +142,7 @@ main() {
   new_id="$(jq -r '.id' <<<"$j2")"
   [[ "$new_id" != "null" && -n "$new_id" ]] || die "version create returned no id"
 
-  echo "old=$old_id new=$new_id env_keys=$(jq -r '(.environment // {}) | keys | join(",")' <<<"$j")"
+  echo "old=$old_id new=$new_id env_keys=$(printf '%s\n' "${env_args[@]}" | cut -d= -f1 | paste -sd,)"
 }
 
 main "$@"
