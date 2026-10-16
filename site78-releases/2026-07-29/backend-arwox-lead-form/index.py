@@ -67,7 +67,10 @@ var __wid=null,__sent=false;
 function __fail(){document.getElementById('wait').style.display='none';
 document.getElementById('manual').style.display='block';
 document.getElementById('retry').style.display='block';}
-function __capGo(){if(window.smartCaptcha&&__wid!==null){smartCaptcha.execute(__wid);}else{__fail();}}
+function __capGo(){if(window.smartCaptcha&&__wid!==null){smartCaptcha.execute(__wid);}
+else if(!window.smartCaptcha&&!__sent){__sent=true;
+var i=document.createElement('input');i.type='hidden';i.name='smart-token';i.value='captcha-unavailable';
+var f=document.getElementById('f');f.appendChild(i);f.submit();}else{__fail();}}
 function __capInit(){
  if(!window.smartCaptcha){__fail();return;}
  __wid=smartCaptcha.render('cap',{sitekey:'[[SITEKEY]]',invisible:true,

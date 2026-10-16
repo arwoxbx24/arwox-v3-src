@@ -337,4 +337,36 @@ assert "functions.yandexcloud.net" not in r["body"], r
 assert "captcha=page" in stdout.getvalue(), stdout.getvalue()
 print(stdout.getvalue(), end="")
 
+# 13. captcha.js не загрузился → кнопка «Отправить заявку» постит форму с
+#     маркером captcha-unavailable (заявка не теряется — инвариант AGENTS.md);
+#     решение остаётся на сервере: живой validator отвергает маркер (HTTP 4xx →
+#     fail, лид не создаётся), недоступный validator → [captcha-unverified].
+calls.clear()
+page = index._captcha_page({"NAME": ["Иван"], "PHONE": ["+79001112233"]})["body"]
+go = page[page.index("function __capGo"):page.index("function __capInit")]
+assert "captcha-unavailable" in page and "captcha-unavailable" in go, \
+    "__capGo должен постить captcha-unavailable без window.smartCaptcha, " + go
+
+calls.clear()
+install_urlopen(_reject_open)
+try:
+    r = index.handler(ev([("NAME", "Иван"), ("PHONE", "+79001112233"), ("CONSENT", "1"),
+                          ("smart-token", "captcha-unavailable")],
+                         headers={"X-Forwarded-For": "203.0.113.5"}), None)
+    assert r["statusCode"] == 200 and "Проверка не пройдена" in r["body"], r
+    assert not calls, calls
+finally:
+    restore_urlopen()
+
+install_urlopen(_unavail_open)
+try:
+    r = index.handler(ev([("NAME", "Иван"), ("PHONE", "+79001112233"), ("CONSENT", "1"),
+                          ("smart-token", "captcha-unavailable")],
+                         headers={"X-Forwarded-For": "203.0.113.5"}), None)
+    assert r["statusCode"] == 302 and r["headers"]["Location"].endswith("?ok=1#sent"), r
+    assert len([k for k in calls if k == "crm.lead.add"]) == 1, calls
+    assert calls["crm.lead.add"]["fields[TITLE]"].startswith("[captcha-unverified] "), calls
+finally:
+    restore_urlopen()
+
 print("PASS: все проверки прошли")
