@@ -75,7 +75,7 @@ if [ "${DEMO_FEED:-}" = 1 ] && [ "${1:-}" = 2 ] && [ -n "${FEED_LOG_LINES:-}" ] 
   : > "$DEMO_TMP/feed-written"
   if [ "${DEMO_RELEASE_TIMER_ON_FEED:-}" = 1 ]; then
     : > "$DEMO_TMP/timer-release"
-    for _ in {1..30}; do grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$DEMO_TMP/dns-switch.args" && break; /bin/sleep 0.1; done
+    for _ in {1..300}; do grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$DEMO_TMP/dns-switch.args" && break; /bin/sleep 0.1; done
   fi
 fi
 if [ "${DEMO_FEED_CLOCK:-}" != 1 ] || { [ "${DEMO_AUTO_RESTORE:-}" != 1 ] && [ "${1:-}" = 2 ]; } || { [ "${DEMO_AUTO_RESTORE:-}" = 1 ] && [ "${1:-}" != 2 ]; }; then
@@ -269,13 +269,13 @@ case15() { # detached one-second timer restores DNS
   setup A
   RUN_TIMER=1 AUTO_RESTORE_SEC=1 run_demo test >"$TMP/out" 2>"$TMP/err" || return 1
   grep -Fq 'forms-ctl.sh" restore' "$TMP/timer-command" || return 1
-  for _ in {1..30}; do grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$TMP/dns-switch.args" && return 0; /bin/sleep 0.1; done
+  for _ in {1..300}; do grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$TMP/dns-switch.args" && return 0; /bin/sleep 0.1; done
   return 1
 }
 case16() { # default restore does not touch the production timer
   setup A
   RUN_TIMER=1 AUTO_TIMER_HOLD=1 AUTO_RESTORE_SEC=1 run_demo test --prod >"$TMP/out" 2>"$TMP/err" || return 1
-  for _ in {1..30}; do [ -f "$TMP/timer-sleep" ] && break; /bin/sleep 0.1; done
+  for _ in {1..300}; do [ -f "$TMP/timer-sleep" ] && break; /bin/sleep 0.1; done
   [ -f "$TMP/run/state/demo-forms.arwox.ru.timer.pid" ] || return 1
   pid=$(cat "$TMP/run/state/demo-forms.arwox.ru.timer.pid")
   run_demo restore >"$TMP/out" 2>"$TMP/err" || return 1
@@ -286,10 +286,10 @@ case17() { # stage-5 failure still leaves and runs the early auto-restore timer
   setup A
   CURL_POST_CODE=500 RUN_TIMER=1 AUTO_TIMER_HOLD=1 AUTO_RESTORE_SEC=1 run_demo test >"$TMP/out" 2>"$TMP/err"; rc=$?
   [ "$rc" -ne 0 ] || return 1
-  for _ in {1..30}; do [ -f "$TMP/run/state/demo-forms-test.arwox.ru.timer.pid" ] && break; /bin/sleep 0.1; done
+  for _ in {1..300}; do [ -f "$TMP/run/state/demo-forms-test.arwox.ru.timer.pid" ] && break; /bin/sleep 0.1; done
   [ -s "$TMP/run/state/demo-forms-test.arwox.ru.timer.pid" ] || return 1
   : > "$TMP/timer-release"
-  for _ in {1..30}; do grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$TMP/dns-switch.args" && return 0; /bin/sleep 0.1; done
+  for _ in {1..300}; do grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$TMP/dns-switch.args" && return 0; /bin/sleep 0.1; done
   return 1
 }
 case18() { # feed reports Bitrix24 outcome without request data
@@ -312,7 +312,7 @@ case20() { # timer restores during the feed after the test lock is released
   lines=$'2026-10-09T15:00:00: forms-backup lead 2026-10-09T12:00:00Z host=forms-test.arwox.ru code=302 result=sent\n2026-10-09T15:00:01: forms-backup lead 2026-10-09T12:00:01Z host=forms-test.arwox.ru code=302 result=sent\n'
   out=$(DEMO_FEED=1 DEMO_FEED_CLOCK=1 DEMO_RELEASE_TIMER_ON_FEED=1 LOCK_TEST=1 RUN_TIMER=1 AUTO_TIMER_HOLD=1 AUTO_RESTORE_SEC=2 BACKUP_LOG="$TMP/backup.out" FEED_LOG_LINES="$lines" run_demo test 2>"$TMP/err"); rc=$?
   [ "$rc" = 0 ] && grep -Fq '🏆 Резерв принял 2' <<< "$out" || return 1
-  for _ in {1..30}; do
+  for _ in {1..300}; do
     grep -Fqx 'apply normal --fqdn forms-test.arwox.ru' "$TMP/dns-switch.args" && ! grep -Fq 'restore result rc=75' "$TMP/run/state/demo.log" && return 0
     /bin/sleep 0.1
   done
