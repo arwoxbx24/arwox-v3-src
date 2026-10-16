@@ -52,9 +52,9 @@ notify() { # type text
     return 0
   fi
   case "$type" in
-    gw_resumed) msg="✅ $GUARD_FQDN: шлюз форм был остановлен (реапер YC) — поднят сторожем, форма отвечает <$2>." ;;
-    low_balance) msg="💸 Баланс Yandex Cloud $2 ₽ (< $GUARD_BALANCE_MIN). Пополнить, иначе реапер остановит шлюз форм." ;;
-    *) msg="${2:-}" ;;
+    gw_resumed) msg="✅ $GUARD_FQDN: шлюз форм был остановлен (реапер YC) — поднят сторожем, форма отвечает <$text>." ;;
+    low_balance) msg="💸 Баланс Yandex Cloud $text ₽ (< $GUARD_BALANCE_MIN). Пополнить, иначе реапер остановит шлюз форм." ;;
+    *) msg="${text:-}" ;;
   esac
   state="{}"
   if [ -f "$STATE_FILE" ]; then
