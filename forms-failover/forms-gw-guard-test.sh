@@ -1165,13 +1165,25 @@ case64() { # billing that does not answer leaves last_iam_ok false
   state_is '.last_iam_ok == false'
 }
 
-for i in {1..64}; do
+case65() { # reserve alerts are not debounced: second and third batches inside the window each alert
+  ext_setup
+  printf 'reserve/req-0001\nreserve/req-0002\n' > "$tmp/reserve.keys"
+  run_guard
+  printf 'reserve/req-0001\nreserve/req-0002\nreserve/req-0003\nreserve/req-0004\n' > "$tmp/reserve.keys"
+  run_guard
+  printf 'reserve/req-0001\nreserve/req-0002\nreserve/req-0003\nreserve/req-0004\nreserve/req-0005\nreserve/req-0006\n' > "$tmp/reserve.keys"
+  run_guard
+  state_is '.last_reserve_key == "reserve/req-0006"' && \
+    [ "$(grep -c 'Заявок в резерве' "$tmp/sent.log" 2>/dev/null)" = 2 ]
+}
+
+for i in {1..65}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/64\n' "$PASS"
+  printf 'PASS %d/65\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/64 (PASS %d/64)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/65 (PASS %d/65)\n' "$FAIL" "$PASS"
   exit 1
 fi
