@@ -168,6 +168,20 @@ case "$*" in
     printf '302\n' > "$GUARD_TEST_TMP/forms.code"
     printf 'ok\n' > "$GUARD_TEST_TMP/forms.body"
     ;;
+  *"logging read"*)
+    printf 'logging-read\n' >> "$GUARD_TEST_TMP/yc-logging.calls"
+    if [ -f "$GUARD_TEST_TMP/yc-logging-fail" ]; then
+      printf 'stub: logging read failed\n' >&2
+      exit 1
+    fi
+    n=$(cat "$GUARD_TEST_TMP/yc-logging-count" 2>/dev/null || echo 0)
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    i=0
+    while [ "$i" -lt "$n" ]; do
+      printf '{"message_version":"1","entry":{"message":"2026-10-16T11:21:44: captcha=unavailable"}}\n'
+      i=$((i + 1))
+    done
+    ;;
 esac
 EOF
 cat > "$tmp/bin/dig" <<'EOF'
@@ -909,13 +923,84 @@ case50() { # drill state file absent: fallback_outage text unchanged
     ! grep -q '^УЧЕНИЯ: ' "$tmp/sent.log"
 }
 
-for i in {1..50}; do
+captcha_setup() {
+  export GUARD_TEST_TMP="$tmp" GUARD_STATE_DIR="$tmp/state"
+  unset GUARD_GW_HOST
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  export GUARD_DRILL_STATE="$tmp/drill/absent.json"
+  mkdir -p "$tmp/drill"
+  rm -f "$tmp/drill/absent.json"
+  printf '100000\n' > "$tmp/clock"
+  printf '302\n' > "$tmp/forms.code"
+  printf 'ok\n' > "$tmp/forms.body"
+  printf '100\n' > "$tmp/balance"
+  rm -f "$tmp/sent.log" "$tmp/state/state.json" "$tmp/state/captcha-check.stamp" \
+    "$tmp/yc-logging-fail" "$tmp/yc-logging.calls" "$tmp/yc-logging-count" "$tmp/reserve.log"
+  export GUARD_RESERVE_LOG="$tmp/reserve.log"
+}
+
+captcha_reserve_log() { # recent_count old_count; epochs are derived from the fake clock,
+  local now recent old i recent_n old_n # written as +0300 wall time to match the pm2 reserve log
+  now=$(cat "$tmp/clock" 2>/dev/null)
+  case "$now" in ''|*[!0-9]*) return 1 ;; esac
+  recent=$(date -u -d "@$((now + 1 + 10800))" '+%Y-%m-%dT%H:%M:%S')
+  old=$(date -u -d "@$((now - 7200 + 10800))" '+%Y-%m-%dT%H:%M:%S')
+  recent_n="${1:-0}"; old_n="${2:-0}"
+  case "$recent_n" in ''|*[!0-9]*) recent_n=0 ;; esac
+  case "$old_n" in ''|*[!0-9]*) old_n=0 ;; esac
+  : > "$tmp/reserve.log"
+  for i in $(seq "$recent_n"); do printf '%s: captcha=unavailable\n' "$recent" >> "$tmp/reserve.log"; done
+  for i in $(seq "$old_n"); do printf '%s: captcha=unavailable\n' "$old" >> "$tmp/reserve.log"; done
+}
+
+case51() { # sum 6 (2 recent reserve + 4 cloud): exactly one captcha_unverified alert, counts only
+  captcha_setup
+  captcha_reserve_log 2 1
+  printf '4\n' > "$tmp/yc-logging-count"
+  run_guard
+  [ "$(grep -c 'без проверки капчи' "$tmp/sent.log")" = 1 ] && \
+    grep -q 'Заявок без проверки капчи за час: 6 (> 5)' "$tmp/sent.log" && \
+    grep -q 'captcha_unverified count=6' "$tmp/guard.log"
+}
+
+case52() { # sum 5 (2 recent reserve + 3 cloud, one 2h-old line excluded): no alert; counting the old line would fire
+  captcha_setup
+  captcha_reserve_log 2 1
+  printf '3\n' > "$tmp/yc-logging-count"
+  run_guard
+  [ ! -s "$tmp/sent.log" ] && [ "$(wc -l < "$tmp/reserve.log")" = 3 ]
+}
+
+case53() { # second tick within the hour does not read the cloud log again
+  captcha_setup
+  captcha_reserve_log 2 0
+  printf '4\n' > "$tmp/yc-logging-count"
+  run_guard
+  printf '103599\n' > "$tmp/clock"
+  printf '9\n' > "$tmp/yc-logging-count"
+  run_guard
+  [ "$(wc -l < "$tmp/yc-logging.calls")" = 1 ] && \
+    [ "$(grep -c 'без проверки капчи' "$tmp/sent.log")" = 1 ]
+}
+
+case54() { # yc logging read fails: tick still exits 0; 3 recent reserve lines (3 old excluded) stay under threshold
+  captcha_setup
+  captcha_reserve_log 3 3
+  touch "$tmp/yc-logging-fail"
+  : > "$tmp/yc-logging.calls"
+  run_guard
+  local rc=$?
+  [ "$rc" = 0 ] && ! [ -s "$tmp/sent.log" ] && \
+    grep -q 'captcha cloud log read failed' "$tmp/guard.log"
+}
+
+for i in {1..54}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/50\n' "$PASS"
+  printf 'PASS %d/54\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/50 (PASS %d/50)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/54 (PASS %d/54)\n' "$FAIL" "$PASS"
   exit 1
 fi

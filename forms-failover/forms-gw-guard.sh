@@ -19,6 +19,10 @@ GUARD_FALL_N="${GUARD_FALL_N:-3}"
 GUARD_RISE_N="${GUARD_RISE_N:-15}"
 GUARD_YC_TIMEOUT="${GUARD_YC_TIMEOUT:-15}"
 GUARD_NOTIFY="${GUARD_NOTIFY:-1}"
+GUARD_CAPTCHA_UNVERIFIED_MAX="${GUARD_CAPTCHA_UNVERIFIED_MAX:-5}"
+GUARD_RESERVE_LOG="${GUARD_RESERVE_LOG:-/root/.pm2/logs/forms-backup-out.log}"
+GUARD_CAPTCHA_FUNCTION_ID="${GUARD_CAPTCHA_FUNCTION_ID:-d4eb92qbfgt3ac0udlmm}"
+GUARD_CAPTCHA_FOLDER_ID="${GUARD_CAPTCHA_FOLDER_ID:-b1g7fof71b9b632o3a4r}"
 [ "$GUARD_NOTIFY" = 0 ] && unset TG_BOT_TOKEN TG_CHAT_ID
 FALLBACK_SWITCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/forms-fallback-switch.sh"
 GUARD_DRILL_STATE="${GUARD_DRILL_STATE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/state/demo-$GUARD_FQDN.json}"
@@ -54,6 +58,7 @@ notify() { # type text
   case "$type" in
     gw_resumed) msg="✅ $GUARD_FQDN: шлюз форм был остановлен (реапер YC) — поднят сторожем, форма отвечает <$text>." ;;
     low_balance) msg="💸 Баланс Yandex Cloud $text ₽ (< $GUARD_BALANCE_MIN). Пополнить, иначе реапер остановит шлюз форм." ;;
+    captcha_unverified) msg="⚠️ Заявок без проверки капчи за час: $text (> $GUARD_CAPTCHA_UNVERIFIED_MAX). Проверьте лиды [captcha-unverified] в Bitrix24." ;;
     *) msg="${text:-}" ;;
   esac
   state="{}"
@@ -306,6 +311,46 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
   fi
 }
 
+count_captcha_reserve() { # file → captcha=unavailable lines of the last hour (pm2 stamps are local +0300)
+  local f="$1" cutoff="$2" n=0 line ts
+  [ -r "$f" ] || { log "captcha reserve log unreadable: $f"; return 1; }
+  while IFS= read -r ts; do
+    [ -n "$ts" ] || continue
+    ts=$(date -d "$ts +0300" +%s 2>/dev/null) || continue
+    [ "$ts" -ge "$cutoff" ] && n=$((n + 1))
+  done < <(grep 'captcha=unavailable' "$f" 2>/dev/null | \
+    sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}T[0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\}\).*/\1/p')
+  printf '%s\n' "$n"
+}
+
+check_captcha_unverified() { # at most once per hour: alert when unverified-captcha submissions exceed the limit
+  local stamp="$GUARD_STATE_DIR/captcha-check.stamp" now last reserve cloud c total
+  now=$(date +%s)
+  if [ -f "$stamp" ]; then
+    last=$(cat "$stamp" 2>/dev/null); case "$last" in ''|*[!0-9]*) last=0 ;; esac
+    [ $((now - last)) -lt 3600 ] && return 0
+  fi
+  printf '%s\n' "$now" > "$stamp.tmp" && mv -f "$stamp.tmp" "$stamp"
+  total=0
+  if reserve=$(count_captcha_reserve "$GUARD_RESERVE_LOG" "$((now - 3600))"); then
+    total=$(($total + reserve))
+  fi
+  local yerr="$GUARD_STATE_DIR/captcha-yc.err" reason
+  if cloud=$(timeout "$GUARD_YC_TIMEOUT" yc --profile default logging read default --since 1h \
+      --resource-ids "$GUARD_CAPTCHA_FUNCTION_ID" --folder-id "$GUARD_CAPTCHA_FOLDER_ID" --format json 2>"$yerr"); then
+    c=$(printf '%s' "$cloud" | grep -c 'captcha=unavailable') || c=0
+    total=$(($total + c))
+  else
+    reason=$(head -n 1 "$yerr" 2>/dev/null)
+    log "captcha cloud log read failed: ${reason:-no stderr}"
+  fi
+  rm -f "$yerr"
+  log "captcha_unverified count=$total"
+  if [ "$total" -gt "$GUARD_CAPTCHA_UNVERIFIED_MAX" ]; then
+    notify captcha_unverified "$total"
+  fi
+}
+
 mkdir -p "$GUARD_STATE_DIR"
 
 for tool in yc jq curl flock awk timeout; do
@@ -385,6 +430,8 @@ elif [ "$stopped" = 0 ] && [ "$ssl" = 0 ] && { [ "${code:0:1}" = 2 ] || [ "${cod
   log "class=ok"
   fallback_track success
 fi
+
+check_captcha_unverified
 
 state=$(jq -c . "$STATE_FILE" 2>/dev/null || printf '%s' '{}')
 if [ "$(jq -r '.fallback_mode // "normal"' <<<"$state")" = outage ] && [ -n "$NPM_HOST_ID" ]; then

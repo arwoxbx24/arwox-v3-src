@@ -35,6 +35,10 @@ DNS `forms.arwox.ru` → A `45.139.76.176` (наш сервер) → NPM proxy h
 | `forms-ctl.sh` | живой тест резерва (`test`/`restore`/`status`): по умолчанию `forms-test.arwox.ru`; `--prod` — боевой `forms.arwox.ru`, только по слову владельца |
 | `*-test.sh`, `server-test.py` | тесты без сети |
 
+## Captcha-unverified leads
+- Every lead titled `[captcha-unverified] …` is reviewed by the lead's responsible user in Bitrix24 (`ASSIGNED_BY_ID`, set by the form handler at lead creation); they review each such lead and delete spam.
+- Alert rule: `forms-gw-guard.sh` alerts once per hour when more than 5 captcha-unverified submissions happened in the last 60 minutes (reserve pm2 log + Cloud Function log, counts only).
+
 ## Бэкенд (`site78-releases/2026-07-29/backend-arwox-lead-form/`)
 - Вход: нативный POST (urlencoded) формы лендинга, точка `handler(event, context)` (`index.py:340`).
 - Ответ — 302 на `LANDING` с хвостом (`index.py:163-165`): успех `#sent` (попап `#psent`); отказы `?err=consent#contact` (`:349`), `?err=empty#contact` (`:354`), `?err=contact#lead-form` (`:360`), `?err=server#contact` (`:450`, `:452`). Страница SmartCaptcha — 200 (`:99`).
