@@ -38,6 +38,8 @@ CONSENT_AGREEMENT_ID = int(os.environ.get("CONSENT_AGREEMENT_ID", "16"))
 CAPTCHA_SITEKEY = os.environ.get("SMARTCAPTCHA_SITEKEY", "")
 CAPTCHA_SECRET = os.environ.get("SMARTCAPTCHA_SECRET", "")
 SELF_URL = os.environ.get("SELF_URL", "https://functions.yandexcloud.net/d4eb92qbfgt3ac0udlmm")
+# Резерв (U1, ADR-053-CR1): пусто = выключен (тесты без сети); бакет задаётся при деплое.
+RESERVE_BUCKET = os.environ.get("RESERVE_BUCKET", "")
 
 _CAPTCHA_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -334,6 +336,36 @@ def _move_failed(path, spool_dir, status):
     _spool_log(path.name, "failed", status)
 
 
+def _reserve(fields, ctx, token):
+    # Резерв (R5/R8): лид не принят CRM и не в спуле — полная заявка одним PUT
+    # в RESERVE_BUCKET (reserve/<rid>.json), формат — как элемент спула; повтор (U2) читает его же.
+    # Один PUT без ретраев; при отказе — этап reserve_error, ответ посетителю не меняется.
+    # В журнал не попадают IAM-токен, URL, текст исключения и тело заявки.
+    j = (lambda stage_, **kw_: _journal(ctx["rid"], ctx["t0"], stage_, **kw_)) if "rid" in ctx else (lambda stage_, **kw_: None)
+    if not RESERVE_BUCKET:
+        j("reserve_error", error="reserve_disabled", message="Request was not saved to reserve.")
+        return False
+    if not token:
+        j("reserve_error", error="no_iam_token", message="Request was not saved to reserve.")
+        return False
+    body = json.dumps({
+        "request_id": ctx["rid"], "created": ctx.get("created_at", ""), "fields": fields,
+        "ctx": {k: v for k, v in ctx.items() if k not in ("rid", "t0")},
+    }, ensure_ascii=False).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            f"https://storage.yandexcloud.net/{RESERVE_BUCKET}/reserve/{ctx['rid']}.json",
+            data=body, method="PUT")
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        j("reserve_error", error=type(e).__name__, message="Request was not saved to reserve.")
+        return False
+    j("reserved")
+    return True
+
+
 def drain_spool(spool_dir, now=None):
     """Дослать очередь. Одна запись не останавливает обработку соседних."""
     now = time.time() if now is None else now
@@ -483,18 +515,20 @@ def handler(event, context):
         "consent_mailing": bool(get("CONSENT_MAILING")),
         "rid": rid, "t0": t0,  # журнал этапов (b24_*): без rid — фоновые досылки очереди
     }
+    frag = "?ok=1#psent" if form_content == "popup" else "?ok=1#sent"
     status = create_lead(fields, lead_context)
+    if status == "success":
+        return _redirect(frag)
     if status.startswith("transient"):
         spool_dir = os.environ.get("LEAD_SPOOL_DIR")
         if spool_dir:
             try:
                 if _enqueue_lead(spool_dir, fields, lead_context):
-                    frag = "?ok=1#psent" if form_content == "popup" else "?ok=1#sent"
                     return _redirect(frag)
             except Exception:
                 pass
-        return _redirect("?err=server#contact")
-    if status != "success":
-        return _redirect("?err=server#contact")
-    frag = "?ok=1#psent" if form_content == "popup" else "?ok=1#sent"
-    return _redirect(frag)
+    raw_token = getattr(context, "token", None)  # token может быть не dict — пустой токен → no_iam_token в _reserve
+    if _reserve(fields, lead_context,
+                raw_token.get("access_token", "") if isinstance(raw_token, dict) else ""):
+        return _redirect(frag)
+    return _redirect("?err=server#contact")
