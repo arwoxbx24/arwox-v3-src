@@ -51,7 +51,7 @@ for arg in "$@"; do
   esac
 done
 printf '%s\n' "$@" >> "$GUARD_TEST_TMP/curl.argv.log"
-if [ -n "$use_resolve" ] && [[ "$url" = https://* ]] && [ "$(cat "$GUARD_TEST_TMP/forms.code")" = 000 ]; then
+if [ -n "$use_resolve" ] && [[ "$url" = https://* ]] && [ "$(cat "$GUARD_TEST_TMP/forms.code" 2>/dev/null)" = 000 ]; then
   exit 1
 fi
 if [ -n "$use_k" ]; then
@@ -118,9 +118,14 @@ case "$url" in
     printf '{"ok":true}\n'
     ;;
   *getMe*)
-    printf '{"ok":true,"result":{"username":"StatusTrackers_bot"}}\n'
+    if [ -f "$GUARD_TEST_TMP/getme.fail" ]; then
+      printf '{"ok":false,"error_code":401,"description":"Unauthorized"}\n'
+    else
+      printf '{"ok":true,"result":{"username":"StatusTrackers_bot"}}\n'
+    fi
     ;;
   *billingAccounts*)
+    if [ -f "$GUARD_TEST_TMP/billing.fail" ]; then exit 1; fi
     printf '{"billingAccounts":[{"active":true,"balance":"%s"}]}\n' "$(cat "$GUARD_TEST_TMP/balance")"
     ;;
   https://storage.yandexcloud.net/*|https://ya.ru/*)
@@ -136,12 +141,12 @@ case "$url" in
       fi
     else
       [ -n "$out_file" ] && cat "$GUARD_TEST_TMP/forms.body" > "$out_file"
-      printf '%s 0\n' "$(cat "$GUARD_TEST_TMP/forms.code")"
+      printf '%s 0\n' "$(cat "$GUARD_TEST_TMP/forms.code" 2>/dev/null)"
     fi
     ;;
   *)
     [ -n "$out_file" ] && cat "$GUARD_TEST_TMP/forms.body" > "$out_file"
-    printf '%s 0\n' "$(cat "$GUARD_TEST_TMP/forms.code")"
+    printf '%s 0\n' "$(cat "$GUARD_TEST_TMP/forms.code" 2>/dev/null)"
     ;;
 esac
 EOF
@@ -167,6 +172,39 @@ case "$*" in
     printf 'ACTIVE\n' > "$GUARD_TEST_TMP/gw.status"
     printf '302\n' > "$GUARD_TEST_TMP/forms.code"
     printf 'ok\n' > "$GUARD_TEST_TMP/forms.body"
+    ;;
+  "serverless function get"*)
+    if [ -f "$GUARD_TEST_TMP/fn.fail" ]; then
+      printf 'stub: function get failed\n' >&2
+      exit 1
+    fi
+    printf '{"status":"%s"}\n' "$(cat "$GUARD_TEST_TMP/fn.status" 2>/dev/null || echo ACTIVE)"
+    ;;
+  *"storage s3api list-objects"*)
+    printf '%s\n' "$*" >> "$GUARD_TEST_TMP/reserve.calls"
+    if [ -f "$GUARD_TEST_TMP/reserve.fail" ]; then
+      printf 'stub: list failed\n' >&2
+      exit 1
+    fi
+    after=""
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "--start-after" ]; then after="$a"; fi
+      prev="$a"
+    done
+    items=""
+    while IFS= read -r k; do
+      [ -n "$k" ] || continue
+      if [ -z "$after" ] || [[ "$k" > "$after" ]]; then
+        printf -v item '{"key":"%s","size":1}' "$k"
+        items="${items:+$items,}$item"
+      fi
+    done < <(cat "$GUARD_TEST_TMP/reserve.keys" 2>/dev/null)
+    if [ -n "$items" ]; then
+      printf '{"contents":[%s],"key_count":1,"is_truncated":false}\n' "$items"
+    else
+      printf '{"key_count":0,"is_truncated":false}\n'
+    fi
     ;;
   *"logging read"*)
     printf 'logging-read\n' >> "$GUARD_TEST_TMP/yc-logging.calls"
@@ -994,13 +1032,146 @@ case54() { # yc logging read fails: tick still exits 0; 3 recent reserve lines (
     grep -q 'captcha cloud log read failed' "$tmp/guard.log"
 }
 
-for i in {1..54}; do
+sent_has() { grep -Fq -- "$1" "$tmp/sent.log" 2>/dev/null; }
+state_is() { jq -e "$1" "$tmp/state/state.json" >/dev/null 2>&1; }
+
+ext_setup() { # U1 cases: shared setup, healthy forms, fixtures of earlier cases removed
+  snapshot_setup
+  export GUARD_FALL_N=3 GUARD_RISE_N=15
+  unset GUARD_NOTIFY
+  export TG_BOT_TOKEN=test TG_CHAT_ID=1
+  dns_success_setup
+  export GUARD_RESERVE_LOG="$tmp/reserve.log" GUARD_DRILL_STATE="$tmp/drill/absent.json"
+  rm -f "$tmp/fn.status" "$tmp/fn.fail" "$tmp/getme.fail" "$tmp/billing.fail" \
+    "$tmp/reserve.keys" "$tmp/reserve.fail" "$tmp/reserve.calls" "$tmp/reserve.log" \
+    "$tmp/yc-logging-fail" "$tmp/yc-logging-count" "$tmp/yc-logging.calls" \
+    "$tmp/state/captcha-check.stamp" "$tmp/yc-hang"
+  printf '100000\n' > "$tmp/clock"
+  printf '302\n' > "$tmp/forms.code"
+  printf 'ok\n' > "$tmp/forms.body"
+  printf 'ACTIVE\n' > "$tmp/gw.status"
+  printf '100\n' > "$tmp/balance"
+}
+
+gw_stopped_setup() { # stopped gateway whose resume fails on every run
+  ext_setup
+  printf '403\n' > "$tmp/forms.code"
+  printf 'form is stopped and cannot be used\n' > "$tmp/forms.body"
+  printf 'STOPPED\n' > "$tmp/gw.status"
+  touch "$tmp/resume.fail"
+}
+
+case55() { # stopped gateway with stopped function is a cascade: tier, state and text
+  gw_stopped_setup
+  printf 'STOPPED\n' > "$tmp/fn.status"
+  run_guard; run_guard; run_guard
+  state_is '.incident_tier == "архитектура" and .incident_cascade == 1 and .incident_class == "gw_stopped"' && \
+    grep -q 'class=gw_stopped tier=архитектура cascade=1' "$tmp/guard.log" && \
+    sent_has 'класс: архитектура, каскад: шлюз+функция'
+}
+
+case56() { # stopped gateway with healthy function is not a cascade
+  gw_stopped_setup
+  printf 'ACTIVE\n' > "$tmp/fn.status"
+  run_guard; run_guard; run_guard
+  state_is '.incident_cascade == 0' && \
+    grep -q 'cascade=0' "$tmp/guard.log" && \
+    sent_has 'класс: архитектура, заявки' && \
+    ! sent_has 'каскад'
+}
+
+case57() { # unreadable function status counts as cascade and is logged
+  gw_stopped_setup
+  touch "$tmp/fn.fail"
+  run_guard; run_guard; run_guard
+  state_is '.incident_cascade == 1' && \
+    grep -q 'function status read failed' "$tmp/guard.log" && \
+    sent_has 'каскад: шлюз+функция'
+}
+
+case58() { # outage start recorded before the first recovered tick still gives the duration in the recovery text
+  ext_setup
+  printf '000\n' > "$tmp/forms.code"
+  printf 'unavailable\n' > "$tmp/forms.body"
+  run_guard; run_guard; run_guard
+  printf '103600\n' > "$tmp/clock"
+  printf '302\n' > "$tmp/forms.code"
+  printf 'ok\n' > "$tmp/forms.body"
+  for i in $(seq 15); do run_guard; done
+  sent_has 'вернулись на основной (сбой: yandex_service, длительность 1ч 0м)'
+}
+
+case59() { # first run records the newest reserve key and sends nothing
+  ext_setup
+  printf 'reserve/req-0001\nreserve/req-0002\n' > "$tmp/reserve.keys"
+  run_guard
+  state_is '.last_reserve_key == "reserve/req-0002"' && \
+    ! sent_has 'Заявок в резерве' && \
+    ! grep -Fq -- '--start-after' "$tmp/reserve.calls" 2>/dev/null
+}
+
+case60() { # second run lists after the recorded cursor and alerts once with the count
+  ext_setup
+  printf 'reserve/req-0001\nreserve/req-0002\n' > "$tmp/reserve.keys"
+  run_guard
+  printf 'reserve/req-0001\nreserve/req-0002\nreserve/req-0003\nreserve/req-0004\n' > "$tmp/reserve.keys"
+  run_guard
+  state_is '.last_reserve_key == "reserve/req-0004"' && \
+    grep -Fq -- '--start-after reserve/req-0002' "$tmp/reserve.calls" && \
+    sent_has 'Заявок в резерве (Bitrix24 не принял): 2. Ключи в бакете arwox-forms-reserve-b1g7fof71b9b632o3a4r/reserve/.' && \
+    [ "$(grep -c 'Заявок в резерве' "$tmp/sent.log" 2>/dev/null)" = 1 ]
+}
+
+case61() { # failing list: tick exits 0, cursor kept, no alert
+  ext_setup
+  printf 'reserve/req-0001\n' > "$tmp/reserve.keys"
+  run_guard
+  printf 'reserve/req-0001\nreserve/req-0002\n' > "$tmp/reserve.keys"
+  touch "$tmp/reserve.fail"
+  run_guard; rc=$?
+  [ "$rc" = 0 ] && state_is '.last_reserve_key == "reserve/req-0001"' && \
+    ! sent_has 'Заявок в резерве' && \
+    grep -q 'reserve list failed' "$tmp/guard.log"
+}
+
+case62() { # three hourly cloud read failures alert once; a success resets the streak
+  ext_setup
+  touch "$tmp/yc-logging-fail"
+  run_guard
+  printf '103600\n' > "$tmp/clock"; run_guard
+  printf '107200\n' > "$tmp/clock"; run_guard
+  printf '110800\n' > "$tmp/clock"; run_guard
+  state_is '.cloud_read_fail == 4' && \
+    [ "$(grep -c 'не читается' "$tmp/sent.log" 2>/dev/null)" = 1 ] && \
+    sent_has 'Яндекс-журнал функции не читается 3 раз подряд' || return 1
+  rm -f "$tmp/yc-logging-fail"
+  printf '114400\n' > "$tmp/clock"; run_guard
+  state_is '.cloud_read_fail == 0'
+}
+
+case63() { # non-ok getMe logs bot unknown, never the literal null
+  ext_setup
+  touch "$tmp/getme.fail"
+  run_guard
+  grep -q 'bot unknown' "$tmp/guard.log" && ! grep -q 'bot null' "$tmp/guard.log"
+}
+
+case64() { # billing that does not answer leaves last_iam_ok false
+  ext_setup
+  run_guard
+  state_is '.last_iam_ok == true' || return 1
+  touch "$tmp/billing.fail"
+  run_guard
+  state_is '.last_iam_ok == false'
+}
+
+for i in {1..64}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/54\n' "$PASS"
+  printf 'PASS %d/64\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/54 (PASS %d/54)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/64 (PASS %d/64)\n' "$FAIL" "$PASS"
   exit 1
 fi
