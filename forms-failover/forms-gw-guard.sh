@@ -110,7 +110,7 @@ notify() { # type text
       elapsed=$((now - started))
       msg="✅ $GUARD_FQDN: восстановлено. Сбой длился $(outage_duration "$elapsed")."
       ;;
-    fallback_outage|fallback_normal|fallback_*)
+    fallback_outage|fallback_normal|fallback_*|reserve_lead)
       ;;
     *)
       ts=$(echo "$state" | jq -r --arg t "$type" '.[$t] // 0' 2>/dev/null || echo 0)
