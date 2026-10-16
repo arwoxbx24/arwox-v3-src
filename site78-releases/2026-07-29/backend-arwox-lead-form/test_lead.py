@@ -369,4 +369,21 @@ try:
 finally:
     restore_urlopen()
 
+# 14. U2: токен длиннее 4096 символов — 'fail' без вызова validator (не 5xx/таймаут →
+#     не unavailable → лид с префиксом не создаётся из мусора).
+_urlopen_calls = [0]
+
+
+def _counting_open(_req, **_kw):
+    _urlopen_calls[0] += 1
+    return _Ok()
+
+
+install_urlopen(_counting_open)
+try:
+    assert index._captcha_ok("x" * 5000, "203.0.113.5") == "fail", "токен >4096 → fail"
+    assert _urlopen_calls[0] == 0, "validator не должен вызываться для токена >4096"
+finally:
+    restore_urlopen()
+
 print("PASS: все проверки прошли")
