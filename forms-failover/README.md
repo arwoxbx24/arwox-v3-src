@@ -30,3 +30,26 @@ bash /root/workspaces/projects/arwox-v3-src/forms-failover/forms-ctl.sh restore 
 - `❌` — этап остановлен ошибкой; смотрите текст строки.
 - `🟢` — можно отправлять форму: резерв готов.
 - `⚠️` — тест сам вернул DNS, потому что сторож этого не сделал.
+
+## yc CLI registry (agents)
+
+Agents run only these yc 1.36.0 command paths for the forms contour; each was checked with `yc <path> --help` on 2026-10-16.
+yc does not fail on an unknown subcommand: it prints the parent help with exit 0. A path is valid only if the `Usage:` line of `yc <path> --help` starts with `yc <path>`.
+
+| Purpose | Command |
+|---|---|
+| IAM token | `yc iam create-token` |
+| Gateway state | `yc serverless api-gateway get\|list <id>` |
+| Gateway restart after reaper | `yc serverless api-gateway resume <id>` |
+| Gateway domain | `yc serverless api-gateway add-domain\|remove-domain` |
+| Function info | `yc serverless function get\|list` |
+| Function versions | `yc serverless function version list\|get\|get-by-tag --function-id <id> --tag '$latest'` |
+| Function deploy | `yc serverless function version create --function-id <id> …` (only via `forms-failover/fn-deploy.sh`) |
+| Function rollback | `yc serverless function version set-tag --id <version-id> --tag '$latest'` (only via `fn-deploy.sh --rollback`) |
+| Certificates | `yc certificate-manager certificate list` |
+| Logs | `yc logging read <group> --since 1h --resource-ids <id>` |
+| Bucket settings incl. lifecycle | `yc storage bucket get <name> --full` |
+
+Wrong forms seen in agent transcripts 2026-10-09…16 and their replacements:
+- `yc serverless function set-tag` → `yc serverless function version set-tag --id <version-id> --tag <tag>`
+- `yc storage s3api get-bucket-lifecycle-configuration` → `yc storage bucket get <name> --full`
