@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 import threading
@@ -137,6 +138,12 @@ _FORM_LABELS = {
 }
 
 
+def _journal(rid, t0_ns, stage, **kw):
+    # Этап заявки одной JSON-строкой: общий request_id, без ПДн (только булевы has_*).
+    ev = {"request_id": rid, "stage": stage, "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z", "latency_ms": round((time.monotonic_ns() - t0_ns) / 1_000_000, 1)}
+    ev.update({k: kw[k] for k in ("form", "has_name", "has_phone", "has_email", "has_consent", "lead_id", "error", "message", "rejection") if k in kw}); print(json.dumps(ev, ensure_ascii=False))
+
+
 def call_b24(method, params, _retries=3, _backoff=2.0, as_json=False, with_status=False):
     """POST в Bitrix24 REST через вебхук. Ретраи на сетевых и transient-ошибках.
     Возвращает распарсенный dict; на полном отказе — {} (никогда не бросает).
@@ -208,14 +215,17 @@ _SPOOL_LOCK = Lock()
 
 
 def _lead_status(fields, ctx):
+    j = (lambda stage_, **kw_: _journal(ctx["rid"], ctx["t0"], stage_, **kw_)) if "rid" in ctx else (lambda stage_, **kw_: None)
     outcome = call_b24("crm.lead.add", fields, with_status=True)
     if isinstance(outcome, tuple):
         res, status = outcome
     else:  # совместимо с существующими тестовыми заглушками call_b24
         res, status = outcome, "success" if outcome.get("result") else "content:empty"
     if status != "success" or not res.get("result"):
+        j("b24_error", error="crm_lead_add_failed", message="Lead was not created.")
         return status if status.startswith("transient") else "content:lead"
 
+    j("b24_lead_ok", lead_id=res["result"])
     try:
         ip = ctx.get("ip", "")
         if ip:
@@ -255,15 +265,19 @@ def _lead_status(fields, ctx):
                              "IP": ip, "LINK": f"https://{ref_origin}/" if ref_origin else LANDING},
                 },
             }}, as_json=True)
-            act_id = act.get("result") if isinstance(act.get("result"), int) else None
-            call_b24("userconsent.consent.add", {
+            act_id = act.get("result") if isinstance(act, dict) and type(act.get("result")) is int and act.get("result") > 0 else None
+            consent_res = call_b24("userconsent.consent.add", {
                 "AGREEMENT_ID": CONSENT_AGREEMENT_ID, "IP": ip,
                 "URL": f"https://{ref_origin}" if ref_origin else LANDING,
                 "ORIGINATOR_ID": "crm/activity" if act_id else (contact or ctx.get("name", "")),
                 "ORIGIN_ID": str(act_id) if act_id else f"arwox-lead-form:{form_content or 'form'}",
             })
+            if act_id is not None and isinstance(consent_res, dict) and consent_res.get("result"):
+                j("b24_consent_ok", lead_id=res["result"])
+            else:
+                j("b24_error", error="consent_add_failed", message="Consent was not saved.")
     except Exception:
-        pass  # ponytail: согласие best-effort, лид уже создан — ответ не рушим
+        j("b24_error", error="consent_processing_failed", message="Consent processing failed.")  # ponytail: согласие best-effort, лид уже создан — ответ не рушим
     B24_OUTCOME.value = f"lead:{res['result']}"
     return "success"
 
@@ -360,21 +374,30 @@ def handler(event, context):
 
     p = _body_params(event)
     get = lambda k: (p.get(k, [""])[0] or "").strip()
+    rid, t0 = str(uuid.uuid4()), time.monotonic_ns()
+    phone_raw = get("PHONE")
+    form = get("UTM_CONTENT"); form = form if form in _FORM_LABELS else "unknown"
+    _journal(rid, t0, "received", form=form, has_name=bool(get("NAME")), has_phone=bool(phone_raw), has_email=bool(get("EMAIL")) or ("@" in phone_raw), has_consent=bool(get("CONSENT")))
 
     # Согласие на обработку ПД обязательно — сервер отвергает без него.
     if not get("CONSENT"):
+        _journal(rid, t0, "rejected", rejection="consent")
         return _redirect("?err=consent#contact")
 
     name = get("NAME")
     contact = get("PHONE") or get("EMAIL")  # контактное поле: телефон ИЛИ e-mail
     if not contact and not name:
+        _journal(rid, t0, "rejected", rejection="empty")
         return _redirect("?err=empty#contact")
     # Серверная валидация контакта (2-й уровень после pattern в браузере —
     # работает даже при закэшированной старой разметке): e-mail по форме,
     # телефон = 10-15 цифр после чистки. Мусор («12323») лид не создаёт.
     if contact and not _valid_contact(contact):
+        _journal(rid, t0, "rejected", rejection="contact")
         # инлайн-строка ошибки в форме (#lead-form:target .srv-err), без попапов
         return _redirect("?err=contact#lead-form")
+
+    _journal(rid, t0, "validated")
 
     # Реферер считаем ДО шага капчи: второй POST приходит уже со страницы капчи (forms.arwox.ru),
     # поэтому исходный домен (arwox.ru) переносим скрытым полем REF_ORIGIN; свой домен — не источник.
@@ -458,6 +481,7 @@ def handler(event, context):
         "company": company, "industry": industry, "team_size": get("TEAM_SIZE"), "tools": tools,
         "launch": get("LAUNCH"), "comments": get("COMMENTS"),
         "consent_mailing": bool(get("CONSENT_MAILING")),
+        "rid": rid, "t0": t0,  # журнал этапов (b24_*): без rid — фоновые досылки очереди
     }
     status = create_lead(fields, lead_context)
     if status.startswith("transient"):
