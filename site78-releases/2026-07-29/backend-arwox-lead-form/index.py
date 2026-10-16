@@ -40,6 +40,11 @@ CAPTCHA_SECRET = os.environ.get("SMARTCAPTCHA_SECRET", "")
 SELF_URL = os.environ.get("SELF_URL", "https://functions.yandexcloud.net/d4eb92qbfgt3ac0udlmm")
 # Резерв (U1, ADR-053-CR1): пусто = выключен (тесты без сети); бакет задаётся при деплое.
 RESERVE_BUCKET = os.environ.get("RESERVE_BUCKET", "")
+# Проба резерва (CR-T-FR5): токен-маркер тестовой функции. Активен только при
+# WEBHOOK == "https://crm.invalid"; в проде реальный WEBHOOK_URL закрывает путь (см. handler).
+_PROBE_TOKEN = "probe-reserve"
+# Журнал этапов текущего запроса: _journal дописывает события, handler сбрасывает в начале.
+_JOURNAL_EVENTS = []
 
 _CAPTCHA_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -99,7 +104,8 @@ def _captcha_page(params, error=False):
         for v in vals:
             hidden.append('<input type="hidden" name="%s" value="%s">'
                           % (html.escape(k, True), html.escape(v, True)))
-    err = '<div class="e">Проверка не пройдена, попробуйте ещё раз.</div>' if error else ''
+    err = ('<div class="e">Проверка не пройдена, попробуйте ещё раз. '
+           'Или позвоните: <a href="tel:+79287051199">+7 928 705-11-99</a></div>') if error else ''
     body = (_CAPTCHA_HTML.replace("[[HIDDEN]]", "\n".join(hidden))
             .replace("[[SITEKEY]]", html.escape(CAPTCHA_SITEKEY, True))
             .replace("[[ERR]]", err))
@@ -113,8 +119,11 @@ def _captcha_ok(token, ip):
     Три состояния: 'ok' — пройдена; 'fail' — не пройдена или нет ключей (лид отклоняем);
     'unavailable' — validator недоступен (сеть/таймаут/HTTP 5xx/не-JSON), лид проходит
     с пометкой [captcha-unverified] в TITLE, чтобы заявки не терялись при сбое Яндекса.
-    HTTP 4xx от validator — отказ капчи (спам-токен): 'fail', лид не проходит."""
+    HTTP 4xx от validator — отказ капчи (спам-токен): 'fail', лид не проходит.
+    U2: токен длиннее 4096 символов — мусор, до validator не доходит: 'fail' (не 5xx/таймаут)."""
     if not (CAPTCHA_SITEKEY and CAPTCHA_SECRET):
+        return "fail"
+    if len(token) > 4096:
         return "fail"
     try:
         data = urllib.parse.urlencode({"secret": CAPTCHA_SECRET, "token": token, "ip": ip}).encode()
@@ -143,7 +152,9 @@ _FORM_LABELS = {
 def _journal(rid, t0_ns, stage, **kw):
     # Этап заявки одной JSON-строкой: общий request_id, без ПДн (только булевы has_*).
     ev = {"request_id": rid, "stage": stage, "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z", "latency_ms": round((time.monotonic_ns() - t0_ns) / 1_000_000, 1)}
-    ev.update({k: kw[k] for k in ("form", "has_name", "has_phone", "has_email", "has_consent", "lead_id", "error", "message", "rejection") if k in kw}); print(json.dumps(ev, ensure_ascii=False))
+    ev.update({k: kw[k] for k in ("form", "has_name", "has_phone", "has_email", "has_consent", "lead_id", "error", "message", "rejection") if k in kw})
+    _JOURNAL_EVENTS.append(ev)
+    print(json.dumps(ev, ensure_ascii=False))
 
 
 def call_b24(method, params, _retries=3, _backoff=2.0, as_json=False, with_status=False):
@@ -185,6 +196,13 @@ def _redirect(fragment):
     """302 обратно на лендинг с указанным хвостом (#sent / ?err=...#contact)."""
     sep = "" if fragment.startswith(("#", "?")) else "#"
     return {"statusCode": 302, "headers": {"Location": f"{LANDING}{sep}{fragment}"}, "body": ""}
+
+
+def _probe_response(rid):
+    """Проба резерва (CR-T-FR5): вместо редиректа — журнал этапов без ПДн."""
+    return {"statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"request_id": rid, "journal": _JOURNAL_EVENTS}, ensure_ascii=False)}
 
 
 def _valid_contact(c):
@@ -401,6 +419,7 @@ def drain_spool(spool_dir, now=None):
 
 
 def handler(event, context):
+    _JOURNAL_EVENTS.clear()
     if (event.get("httpMethod") or "").upper() != "POST":
         return _redirect("#contact")
 
@@ -446,11 +465,19 @@ def handler(event, context):
         p["REF_ORIGIN"] = [ref_origin]
         print("captcha=page", flush=True)
         return _captcha_page(p)
-    captcha_state = _captcha_ok(token, consent.extract_request_context(event)["ip"])
-    print(f"captcha={captcha_state}", flush=True)
-    if captcha_state == "fail":
-        p["REF_ORIGIN"] = [ref_origin]
-        return _captcha_page(p, error=True)
+    probe = WEBHOOK == "https://crm.invalid" and token == _PROBE_TOKEN
+    if probe:
+        # Проба резерва: машина не проходит SmartCaptcha, поэтому на тестовой функции
+        # (WEBHOOK=crm.invalid) маркер _PROBE_TOKEN минует _captcha_ok. В проде реальный
+        # WEBHOOK_URL закрывает этот путь, и токен идёт через validator как обычно.
+        print("captcha=probe", flush=True)
+        captcha_state = "ok"
+    else:
+        captcha_state = _captcha_ok(token, consent.extract_request_context(event)["ip"])
+        print(f"captcha={captcha_state}", flush=True)
+        if captcha_state == "fail":
+            p["REF_ORIGIN"] = [ref_origin]
+            return _captcha_page(p, error=True)
     captcha_prefix = "[captcha-unverified] " if captcha_state == "unavailable" else ""
 
     tools = [t.strip() for t in p.get("TOOLS", []) if t.strip()]
@@ -518,17 +545,17 @@ def handler(event, context):
     frag = "?ok=1#psent" if form_content == "popup" else "?ok=1#sent"
     status = create_lead(fields, lead_context)
     if status == "success":
-        return _redirect(frag)
+        return _probe_response(rid) if probe else _redirect(frag)
     if status.startswith("transient"):
         spool_dir = os.environ.get("LEAD_SPOOL_DIR")
         if spool_dir:
             try:
                 if _enqueue_lead(spool_dir, fields, lead_context):
-                    return _redirect(frag)
+                    return _probe_response(rid) if probe else _redirect(frag)
             except Exception:
                 pass
     raw_token = getattr(context, "token", None)  # token может быть не dict — пустой токен → no_iam_token в _reserve
     if _reserve(fields, lead_context,
                 raw_token.get("access_token", "") if isinstance(raw_token, dict) else ""):
-        return _redirect(frag)
-    return _redirect("?err=server#contact")
+        return _probe_response(rid) if probe else _redirect(frag)
+    return _probe_response(rid) if probe else _redirect("?err=server#contact")

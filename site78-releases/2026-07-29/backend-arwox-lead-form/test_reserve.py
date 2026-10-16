@@ -94,4 +94,39 @@ r, evts, _ = run(_BASE, type("StrCtx", (), {"token": "x"}))
 assert r["statusCode"] == 302 and r["headers"]["Location"].endswith("?err=server#contact"), r
 assert len(REQS) - base == 0 and any(
     e["stage"] == "reserve_error" and e["error"] == "no_iam_token" for e in evts), evts
+# CR-T-FR6: страница капчи с ошибкой — запасной контакт (телефон сайта).
+page = index._captcha_page({"NAME": ["Иван"], "PHONE": ["+79001112233"]}, error=True)["body"]
+assert "tel:+79287051199" in page and "+7 928 705-11-99" in page, page
+# CR-T-FR5 (a): проба резерва — WEBHOOK=crm.invalid + smart-token=probe-reserve.
+# _captcha_ok пропускается, отказ CRM → reserve (один PUT), ответ 200 JSON с журналом без ПДн.
+_saved_webhook = index.WEBHOOK
+index.WEBHOOK = "https://crm.invalid"
+_captcha_calls = []
+index._captcha_ok = lambda token, ip: _captcha_calls.append(token)
+index.call_b24 = fake_call  # crm.lead.add → {} (содержательный отказ CRM)
+index.RESERVE_BUCKET = os.environ["RESERVE_BUCKET"] = "bkt-test"
+base = len(REQS)
+r, evts, out = run([("NAME", "Иван Проба"), ("PHONE", "+79001110999"), ("CONSENT", "1"),
+                    ("smart-token", "probe-reserve")], _IContext)
+assert r["statusCode"] == 200 and r["headers"]["Content-Type"] == "application/json", r
+body = json.loads(r["body"])
+assert set(body) == {"request_id", "journal"}, body
+assert len(body["journal"]) == len(evts) and len({e["request_id"] for e in body["journal"]}) == 1, body
+assert body["request_id"] == body["journal"][0]["request_id"], body
+assert any(e["stage"] == "reserved" for e in body["journal"]), body["journal"]
+assert "captcha=probe" in out and not _captcha_calls, (_captcha_calls, out)
+assert "Иван Проба" not in r["body"] and "+79001110999" not in r["body"], r["body"]
+assert len(REQS) - base == 1, len(REQS)
+# CR-T-FR5 (b): реальный WEBHOOK — маркер probe-reserve не срабатывает, токен идёт через _captcha_ok.
+index.WEBHOOK = "https://example/rest/1/x"
+_captcha_calls = []
+index._captcha_ok = lambda token, ip: _captcha_calls.append(token) or "ok"
+index.call_b24 = lambda m, f, **kw: {"result": 42}
+base = len(REQS)
+r, _, _ = run([("NAME", "Иван Норма"), ("PHONE", "+79001110999"), ("CONSENT", "1"),
+               ("smart-token", "probe-reserve")], _IContext)
+assert r["statusCode"] == 302 and r["headers"]["Location"].endswith("?ok=1#sent"), r
+assert _captcha_calls == ["probe-reserve"], _captcha_calls
+assert len(REQS) - base == 0, len(REQS)
+index.WEBHOOK = _saved_webhook
 print("PASS: reserve")
