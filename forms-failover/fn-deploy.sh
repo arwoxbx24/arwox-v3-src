@@ -38,7 +38,7 @@ main() {
   case "${1:-}" in
     --rollback)
       [[ $# -ge 2 ]] || { usage >&2; die "--rollback requires <version-id>"; }
-      yc serverless function set-tag --id "$FN_ID" --version-id "$2" --tag '$latest'
+      yc serverless function version set-tag --id "$2" --tag '$latest'
       echo "rollback latest=$2"
       exit 0
       ;;
