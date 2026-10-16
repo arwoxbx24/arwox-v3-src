@@ -23,6 +23,7 @@ GUARD_CAPTCHA_UNVERIFIED_MAX="${GUARD_CAPTCHA_UNVERIFIED_MAX:-5}"
 GUARD_RESERVE_LOG="${GUARD_RESERVE_LOG:-/root/.pm2/logs/forms-backup-out.log}"
 GUARD_CAPTCHA_FUNCTION_ID="${GUARD_CAPTCHA_FUNCTION_ID:-d4eb92qbfgt3ac0udlmm}"
 GUARD_CAPTCHA_FOLDER_ID="${GUARD_CAPTCHA_FOLDER_ID:-b1g7fof71b9b632o3a4r}"
+GUARD_RESERVE_BUCKET="${GUARD_RESERVE_BUCKET:-arwox-forms-reserve-b1g7fof71b9b632o3a4r}"
 [ "$GUARD_NOTIFY" = 0 ] && unset TG_BOT_TOKEN TG_CHAT_ID
 FALLBACK_SWITCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/forms-fallback-switch.sh"
 GUARD_DRILL_STATE="${GUARD_DRILL_STATE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/state/demo-$GUARD_FQDN.json}"
@@ -35,6 +36,10 @@ dns_empty=0
 
 log() { printf '%s %s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%S')" "$1" "${2:-}" ; }
 state_write() { cat > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"; }
+state_put() { # key json-value: sets one key of the state file, the file is created when missing
+  [ -f "$STATE_FILE" ] || printf '{}\n' > "$STATE_FILE"
+  jq --arg k "$1" --argjson v "$2" '.[$k] = $v' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+}
 
 outage_duration() { # seconds
   local seconds="$1" hours minutes
@@ -45,7 +50,7 @@ outage_duration() { # seconds
 
 notify() { # type text
   local type="$1" text="$2" now ts state json out msg started last elapsed
-  text=$(printf '%s' "$text" | tr -d '"\r\n' | head -c 400)
+  text=$(printf '%s' "$text" | tr -d '"\r\n' | head -c 600)
   now=$(date +%s)
   if [ -n "$DNS_SWITCH" ] && { [ "$type" = form_error ] || [ "$type" = form_recovered ]; }; then
     log "notify $type suppressed (DNS_SWITCH)"
@@ -53,12 +58,19 @@ notify() { # type text
       json=$(jq 'del(.form_outage_started_at, .form_outage_notified_at)' "$STATE_FILE") &&
         printf '%s\n' "$json" | state_write
     fi
+    if [ "$type" = form_error ]; then # DNS_SWITCH silences the message only; the outage start is still recorded
+      [ -f "$STATE_FILE" ] || printf '{}\n' > "$STATE_FILE"
+      jq --argjson n "$now" 'if (.form_outage_started_at // 0) == 0 then .form_outage_started_at = $n else . end' \
+        "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE" || log "outage start write failed"
+    fi
     return 0
   fi
   case "$type" in
     gw_resumed) msg="✅ $GUARD_FQDN: шлюз форм был остановлен (реапер YC) — поднят сторожем, форма отвечает <$text>." ;;
     low_balance) msg="💸 Баланс Yandex Cloud $text ₽ (< $GUARD_BALANCE_MIN). Пополнить, иначе реапер остановит шлюз форм." ;;
     captcha_unverified) msg="⚠️ Заявок без проверки капчи за час: $text (> $GUARD_CAPTCHA_UNVERIFIED_MAX). Проверьте лиды [captcha-unverified] в Bitrix24." ;;
+    reserve_lead) msg="📥 Заявок в резерве (Bitrix24 не принял): $text. Ключи в бакете $GUARD_RESERVE_BUCKET/reserve/." ;;
+    cloud_read_failed) msg="⚠️ Яндекс-журнал функции не читается $text раз подряд — счётчик заявок без капчи видит только резерв." ;;
     *) msg="${text:-}" ;;
   esac
   state="{}"
@@ -199,13 +211,37 @@ incident_text() { # class → короткий текст для сообщен�
   esac
 }
 
-fallback_failed() { # failed-run bookkeeping: класс инцидента в state и лог, затем счётчик
+incident_tier_of() { # class → уровень инцидента: инфраструктура, архитектура или код
+  case "$1" in
+    billing|access|network|yandex_service) printf 'инфраструктура' ;;
+    gw_stopped) printf 'архитектура' ;;
+    *) printf 'код' ;;
+  esac
+}
+
+incident_fn_status() { # sets fn_status to the captcha function status; empty when the read fails
+  local out
+  if out=$(timeout "$GUARD_YC_TIMEOUT" yc serverless function get "$GUARD_CAPTCHA_FUNCTION_ID" --format json 2>/dev/null); then
+    fn_status=$(printf '%s' "$out" | jq -r '.status // empty' 2>/dev/null)
+  else
+    log "function status read failed"
+    fn_status=""
+  fi
+}
+
+fallback_failed() { # failed-run bookkeeping: класс, уровень и каскад инцидента в state и лог, затем счётчик
+  local st gw_down=0
   incident_classify
-  log "class=$cls"
-  local st
-  st='{"incident_class":"'"$cls"'"}'
+  tier=$(incident_tier_of "$cls")
+  incident_fn_status
+  if [ "${stopped:-0}" = 1 ] || { [ -n "${status:-}" ] && [ "$status" != ACTIVE ]; }; then gw_down=1; fi
+  cascade=0
+  if [ "$gw_down" = 1 ] && [ "$fn_status" != ACTIVE ]; then cascade=1; fi
+  log "class=$cls tier=$tier cascade=$cascade"
+  st='{"incident_class":"'"$cls"'","incident_tier":"'"$tier"'","incident_cascade":'"$cascade"'}'
   if [ -f "$STATE_FILE" ] && st=$(cat "$STATE_FILE" 2>/dev/null) && printf '%s' "$st" | jq -e . >/dev/null 2>&1; then
-    st=$(printf '%s' "$st" | jq -c --arg c "$cls" '.incident_class=$c')
+    st=$(printf '%s' "$st" | jq -c --arg c "$cls" --arg t "$tier" --argjson k "$cascade" \
+      '.incident_class=$c | .incident_tier=$t | .incident_cascade=$k')
   fi
   printf '%s\n' "$st" | state_write
   fallback_track failed
@@ -260,7 +296,7 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
     *) return 0 ;;
   esac
   if [ "$target" = outage ]; then
-    state=$(echo "$state" | jq '.outage_class = (.incident_class // "unknown")')
+    state=$(echo "$state" | jq '.outage_class = (.incident_class // "unknown") | if (.form_outage_started_at // 0) != 0 then .outage_started_at = .form_outage_started_at else . end')
   fi
   printf '%s\n' "$state" | state_write
   rc=0
@@ -287,11 +323,13 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
     case "$target" in
       outage)
         snapshot=$(incident_snapshot)
-        notify fallback_outage "$GUARD_FQDN: сбой основного канала — $(incident_text "$cls") ($cls), заявки принимает резерв, ждём восстановления. Статус Яндекса: https://status.yandex.cloud. Снимок: $snapshot"
+        cascade_note=""
+        if [ "${cascade:-0}" = 1 ]; then cascade_note=", каскад: шлюз+функция"; fi
+        notify fallback_outage "$GUARD_FQDN: сбой основного канала — $(incident_text "$cls") ($cls), класс: ${tier:-код}$cascade_note, заявки принимает резерв, ждём восстановления. Статус Яндекса: https://status.yandex.cloud. Снимок: $snapshot"
         ;;
       normal)
         oc=$(jq -r '.outage_class // .incident_class // "unknown"' "$STATE_FILE" 2>/dev/null); oc=${oc:-unknown}
-        started=$(jq -r '.form_outage_started_at // 0' "$STATE_FILE" 2>/dev/null)
+        started=$(jq -r '.outage_started_at // 0' "$STATE_FILE" 2>/dev/null)
         case "$started" in ''|*[!0-9]*) started=0 ;; esac
         if [ "$started" != 0 ]; then
           prob_details="сбой: $oc, длительность $(outage_duration "$(( $(date +%s) - started ))")"
@@ -300,7 +338,7 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
         fi
         log "recovered class=$oc"
         notify fallback_normal "$GUARD_FQDN: восстановлено — Yandex API Gateway заработал, основной канал стабилен $GUARD_RISE_N мин, вернулись на основной ($prob_details)"
-        jq 'del(.outage_class, .incident_class)' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+        jq 'del(.outage_class, .incident_class, .outage_started_at)' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
         ;;
     esac
   else
@@ -335,19 +373,53 @@ check_captcha_unverified() { # at most once per hour: alert when unverified-capt
   if reserve=$(count_captcha_reserve "$GUARD_RESERVE_LOG" "$((now - 3600))"); then
     total=$(($total + reserve))
   fi
-  local yerr="$GUARD_STATE_DIR/captcha-yc.err" reason
+  local yerr="$GUARD_STATE_DIR/captcha-yc.err" reason fails
   if cloud=$(timeout "$GUARD_YC_TIMEOUT" yc --profile default logging read default --since 1h \
       --resource-ids "$GUARD_CAPTCHA_FUNCTION_ID" --folder-id "$GUARD_CAPTCHA_FOLDER_ID" --format json 2>"$yerr"); then
     c=$(printf '%s' "$cloud" | grep -c 'captcha=unavailable') || c=0
     total=$(($total + c))
+    if [ -f "$STATE_FILE" ] && [ "$(jq -r '.cloud_read_fail // 0' "$STATE_FILE" 2>/dev/null)" != 0 ]; then
+      state_put cloud_read_fail 0 || log "cloud read reset failed"
+    fi
   else
     reason=$(head -n 1 "$yerr" 2>/dev/null)
     log "captcha cloud log read failed: ${reason:-no stderr}"
+    fails=$(jq -r '.cloud_read_fail // 0' "$STATE_FILE" 2>/dev/null) || fails=0
+    case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
+    fails=$((fails + 1))
+    state_put cloud_read_fail "$fails" || log "cloud read counter write failed"
+    if [ "$fails" -ge 3 ]; then notify cloud_read_failed "$fails"; fi
   fi
   rm -f "$yerr"
   log "captcha_unverified count=$total"
   if [ "$total" -gt "$GUARD_CAPTCHA_UNVERIFIED_MAX" ]; then
     notify captcha_unverified "$total"
+  fi
+}
+
+check_reserve_leads() { # new request ids in the reserve bucket: one count alert per run; cursor last_reserve_key in state
+  local initialized=0 last="" out count newest
+  local -a args
+  if [ -f "$STATE_FILE" ] && jq -e 'has("last_reserve_key")' "$STATE_FILE" >/dev/null 2>&1; then
+    initialized=1
+    last=$(jq -r '.last_reserve_key // ""' "$STATE_FILE" 2>/dev/null) || last=""
+  fi
+  args=(storage s3api list-objects --bucket "$GUARD_RESERVE_BUCKET" --prefix reserve/)
+  if [ -n "$last" ]; then args+=(--start-after "$last"); fi
+  args+=(--format json)
+  if ! out=$(timeout "$GUARD_YC_TIMEOUT" yc "${args[@]}" 2>/dev/null); then
+    log "reserve list failed"
+    return 0
+  fi
+  count=$(printf '%s' "$out" | jq -r '(.contents // []) | length' 2>/dev/null) || count=""
+  newest=$(printf '%s' "$out" | jq -r '(.contents // []) | last | .key // empty' 2>/dev/null) || newest=""
+  case "$count" in ''|*[!0-9]*) log "reserve list unparsed"; return 0 ;; esac
+  if [ "$initialized" = 1 ] && [ "$count" -gt 0 ]; then
+    notify reserve_lead "$count"
+  fi
+  if [ "$initialized" = 0 ] || [ "$count" -gt 0 ]; then
+    [ -f "$STATE_FILE" ] || printf '{}\n' > "$STATE_FILE"
+    jq --arg k "$newest" '.last_reserve_key = $k' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE" || log "reserve cursor write failed"
   fi
 }
 
@@ -432,6 +504,7 @@ elif [ "$stopped" = 0 ] && [ "$ssl" = 0 ] && { [ "${code:0:1}" = 2 ] || [ "${cod
 fi
 
 check_captcha_unverified
+check_reserve_leads
 
 state=$(jq -c . "$STATE_FILE" 2>/dev/null || printf '%s' '{}')
 if [ "$(jq -r '.fallback_mode // "normal"' <<<"$state")" = outage ] && [ -n "$NPM_HOST_ID" ]; then
@@ -449,10 +522,11 @@ fi
 IAM=$(timeout "$GUARD_YC_TIMEOUT" yc iam create-token 2>/dev/null)
 if [ -z "$IAM" ]; then
   log "balance skipped"
-  [ -f "$STATE_FILE" ] && jq '.last_iam_ok = false' "$STATE_FILE" > "$STATE_FILE.tmp" 2>/dev/null && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+  state_put last_iam_ok false || log "iam state write failed"
 else
   if resp=$(printf 'url = "https://billing.api.cloud.yandex.net/billing/v1/billingAccounts"\nheader = "Authorization: Bearer %s"\n' \
-      "$IAM" | curl -s --max-time 10 -K - 2>/dev/null); then
+      "$IAM" | curl -s --max-time 10 -K - 2>/dev/null) && \
+     printf '%s' "$resp" | jq -e '.billingAccounts[0].active | type == "boolean"' >/dev/null 2>&1; then
     active=$(printf '%s' "$resp" | jq -r '.billingAccounts[0].active' 2>/dev/null)
     balance=$(printf '%s' "$resp" | jq -r '.billingAccounts[0].balance' 2>/dev/null)
     log "balance $balance active=$active"
@@ -463,13 +537,16 @@ else
       jq -c --arg a "$active" --arg b "$balance" '.last_iam_ok = true | .last_active = $a | .last_balance = $b' \
         "$STATE_FILE" > "$STATE_FILE.tmp" 2>/dev/null && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
     fi
+  else
+    log "balance no answer"
+    state_put last_iam_ok false || log "iam state write failed"
   fi
 fi
 
 if [ -n "${TG_BOT_TOKEN:-}" ]; then
   user="unknown"
   if out=$(printf 'url = "https://api.telegram.org/bot%s/getMe"\n' "$TG_BOT_TOKEN" | curl -s --max-time 10 -K - 2>&1); then
-    user=$(printf '%s' "$out" | jq -r '.result.username' 2>/dev/null)
+    user=$(printf '%s' "$out" | jq -r '.result.username // empty' 2>/dev/null)
   fi
   log "bot ${user:-unknown}"
 fi
