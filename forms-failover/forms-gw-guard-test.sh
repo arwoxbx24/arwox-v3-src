@@ -1190,7 +1190,10 @@ case66() { # provider outage: ten hourly runs with Unavailable read errors send 
     run_guard
   done
   [ "$(grep -c 'Yandex Cloud Logging недоступен' "$tmp/sent.log" 2>/dev/null)" = 1 ] && \
-    ! sent_has 'не читается'
+    ! sent_has 'не читается' && \
+    sent_has 'Unavailable 3 раз подряд' && \
+    ! grep -q '2136' "$tmp/sent.log" && \
+    ! grep -q 'Формы работают' "$tmp/sent.log"
 }
 
 case67() { # outage then stub removed: one recovered message, both flags cleared
