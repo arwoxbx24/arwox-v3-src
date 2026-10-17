@@ -208,6 +208,10 @@ case "$*" in
     ;;
   *"logging read"*)
     printf 'logging-read\n' >> "$GUARD_TEST_TMP/yc-logging.calls"
+    if [ -f "$GUARD_TEST_TMP/yc-logging-unavailable" ]; then
+      printf 'ERROR: getting log group by ID: rpc error: code = Unavailable desc = Unavailable\n' >&2
+      exit 1
+    fi
     if [ -f "$GUARD_TEST_TMP/yc-logging-fail" ]; then
       printf 'stub: logging read failed\n' >&2
       exit 1
@@ -973,7 +977,7 @@ captcha_setup() {
   printf 'ok\n' > "$tmp/forms.body"
   printf '100\n' > "$tmp/balance"
   rm -f "$tmp/sent.log" "$tmp/state/state.json" "$tmp/state/captcha-check.stamp" \
-    "$tmp/yc-logging-fail" "$tmp/yc-logging.calls" "$tmp/yc-logging-count" "$tmp/reserve.log"
+    "$tmp/yc-logging-fail" "$tmp/yc-logging-unavailable" "$tmp/yc-logging.calls" "$tmp/yc-logging-count" "$tmp/reserve.log"
   export GUARD_RESERVE_LOG="$tmp/reserve.log"
 }
 
@@ -1044,7 +1048,7 @@ ext_setup() { # U1 cases: shared setup, healthy forms, fixtures of earlier cases
   export GUARD_RESERVE_LOG="$tmp/reserve.log" GUARD_DRILL_STATE="$tmp/drill/absent.json"
   rm -f "$tmp/fn.status" "$tmp/fn.fail" "$tmp/getme.fail" "$tmp/billing.fail" \
     "$tmp/reserve.keys" "$tmp/reserve.fail" "$tmp/reserve.calls" "$tmp/reserve.log" \
-    "$tmp/yc-logging-fail" "$tmp/yc-logging-count" "$tmp/yc-logging.calls" \
+    "$tmp/yc-logging-fail" "$tmp/yc-logging-unavailable" "$tmp/yc-logging-count" "$tmp/yc-logging.calls" \
     "$tmp/state/captcha-check.stamp" "$tmp/yc-hang"
   printf '100000\n' > "$tmp/clock"
   printf '302\n' > "$tmp/forms.code"
@@ -1177,13 +1181,47 @@ case65() { # reserve alerts are not debounced: second and third batches inside t
     [ "$(grep -c 'Заявок в резерве' "$tmp/sent.log" 2>/dev/null)" = 2 ]
 }
 
-for i in {1..65}; do
+case66() { # provider outage: ten hourly runs with Unavailable read errors send one outage message, no failed-read messages
+  local i
+  ext_setup
+  touch "$tmp/yc-logging-unavailable"
+  for i in $(seq 0 9); do
+    printf '%s\n' $((100000 + i * 3600)) > "$tmp/clock"
+    run_guard
+  done
+  [ "$(grep -c 'Yandex Cloud Logging недоступен' "$tmp/sent.log" 2>/dev/null)" = 1 ] && \
+    ! sent_has 'не читается'
+}
+
+case67() { # outage then stub removed: one recovered message, both flags cleared
+  local i
+  ext_setup
+  touch "$tmp/yc-logging-unavailable"
+  for i in $(seq 0 9); do
+    printf '%s\n' $((100000 + i * 3600)) > "$tmp/clock"
+    run_guard
+  done
+  rm -f "$tmp/yc-logging-unavailable"
+  printf '%s\n' $((100000 + 10 * 3600)) > "$tmp/clock"
+  run_guard
+  [ "$(grep -c 'снова читается' "$tmp/sent.log" 2>/dev/null)" = 1 ] && \
+    state_is '.cloud_read_fail == 0 and .cloud_outage_notified == 0'
+}
+
+case68() { # no outage before: successful cloud read sends no recovered message
+  ext_setup
+  run_guard
+  run_guard
+  [ -s "$tmp/yc-logging.calls" ] && ! sent_has 'снова читается'
+}
+
+for i in {1..68}; do
   if "case$i"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); printf 'FAIL case %s\n' "$i"; fi
 done
 if [ "$FAIL" = 0 ]; then
-  printf 'PASS %d/65\n' "$PASS"
+  printf 'PASS %d/68\n' "$PASS"
   exit 0
 else
-  printf 'FAIL %d/65 (PASS %d/65)\n' "$FAIL" "$PASS"
+  printf 'FAIL %d/68 (PASS %d/68)\n' "$FAIL" "$PASS"
   exit 1
 fi

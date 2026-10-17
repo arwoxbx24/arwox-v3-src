@@ -71,6 +71,8 @@ notify() { # type text
     captcha_unverified) msg="⚠️ Заявок без проверки капчи за час: $text (> $GUARD_CAPTCHA_UNVERIFIED_MAX). Проверьте лиды [captcha-unverified] в Bitrix24." ;;
     reserve_lead) msg="📥 Заявок в резерве (Bitrix24 не принял): $text. Ключи в бакете $GUARD_RESERVE_BUCKET/reserve/." ;;
     cloud_read_failed) msg="⚠️ Яндекс-журнал функции не читается $text раз подряд — счётчик заявок без капчи видит только резерв." ;;
+    cloud_read_outage) msg="⚠️ Журнал Yandex Cloud Logging недоступен — сбой на стороне Яндекса (status.yandex.cloud/ru/incidents/2136). Формы работают; заявки без капчи пока считает только резерв." ;;
+    cloud_read_recovered) msg="✅ Журнал Yandex Cloud Logging снова читается. Счётчик заявок без капчи работает полностью." ;;
     *) msg="${text:-}" ;;
   esac
   state="{}"
@@ -110,7 +112,7 @@ notify() { # type text
       elapsed=$((now - started))
       msg="✅ $GUARD_FQDN: восстановлено. Сбой длился $(outage_duration "$elapsed")."
       ;;
-    fallback_outage|fallback_normal|fallback_*|reserve_lead)
+    fallback_outage|fallback_normal|fallback_*|reserve_lead|cloud_read_outage|cloud_read_recovered)
       ;;
     *)
       ts=$(echo "$state" | jq -r --arg t "$type" '.[$t] // 0' 2>/dev/null || echo 0)
@@ -378,6 +380,10 @@ check_captcha_unverified() { # at most once per hour: alert when unverified-capt
       --resource-ids "$GUARD_CAPTCHA_FUNCTION_ID" --folder-id "$GUARD_CAPTCHA_FOLDER_ID" --format json 2>"$yerr"); then
     c=$(printf '%s' "$cloud" | grep -c 'captcha=unavailable') || c=0
     total=$(($total + c))
+    if [ -f "$STATE_FILE" ] && [ "$(jq -r '.cloud_outage_notified // 0' "$STATE_FILE" 2>/dev/null)" = 1 ]; then
+      notify cloud_read_recovered ""
+      state_put cloud_outage_notified 0 || log "cloud outage reset failed"
+    fi
     if [ -f "$STATE_FILE" ] && [ "$(jq -r '.cloud_read_fail // 0' "$STATE_FILE" 2>/dev/null)" != 0 ]; then
       state_put cloud_read_fail 0 || log "cloud read reset failed"
     fi
@@ -388,7 +394,14 @@ check_captcha_unverified() { # at most once per hour: alert when unverified-capt
     case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
     fails=$((fails + 1))
     state_put cloud_read_fail "$fails" || log "cloud read counter write failed"
-    if [ "$fails" -ge 3 ]; then notify cloud_read_failed "$fails"; fi
+    if [ "$fails" -ge 3 ] && [ "$(jq -r '.cloud_outage_notified // 0' "$STATE_FILE" 2>/dev/null)" != 1 ]; then
+      if grep -q 'code = Unavailable' "$yerr"; then
+        notify cloud_read_outage ""
+        state_put cloud_outage_notified 1 || log "cloud outage flag write failed"
+      else
+        notify cloud_read_failed "$fails"
+      fi
+    fi
   fi
   rm -f "$yerr"
   log "captcha_unverified count=$total"
