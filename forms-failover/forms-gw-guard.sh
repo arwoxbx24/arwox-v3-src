@@ -71,7 +71,7 @@ notify() { # type text
     captcha_unverified) msg="⚠️ Заявок без проверки капчи за час: $text (> $GUARD_CAPTCHA_UNVERIFIED_MAX). Проверьте лиды [captcha-unverified] в Bitrix24." ;;
     reserve_lead) msg="📥 Заявок в резерве (Bitrix24 не принял): $text. Ключи в бакете $GUARD_RESERVE_BUCKET/reserve/." ;;
     cloud_read_failed) msg="⚠️ Яндекс-журнал функции не читается $text раз подряд — счётчик заявок без капчи видит только резерв." ;;
-    cloud_read_outage) msg="⚠️ Журнал Yandex Cloud Logging недоступен — сбой на стороне Яндекса (status.yandex.cloud/ru/incidents/2136). Формы работают; заявки без капчи пока считает только резерв." ;;
+    cloud_read_outage) msg="⚠️ Журнал Yandex Cloud Logging недоступен: Яндекс отвечает Unavailable $text раз подряд. Счётчик заявок без капчи видит только резерв. Повтор — только после восстановления. Статус Яндекса: status.yandex.cloud" ;;
     cloud_read_recovered) msg="✅ Журнал Yandex Cloud Logging снова читается. Счётчик заявок без капчи работает полностью." ;;
     *) msg="${text:-}" ;;
   esac
@@ -396,7 +396,7 @@ check_captcha_unverified() { # at most once per hour: alert when unverified-capt
     state_put cloud_read_fail "$fails" || log "cloud read counter write failed"
     if [ "$fails" -ge 3 ] && [ "$(jq -r '.cloud_outage_notified // 0' "$STATE_FILE" 2>/dev/null)" != 1 ]; then
       if grep -q 'code = Unavailable' "$yerr"; then
-        notify cloud_read_outage ""
+        notify cloud_read_outage "$fails"
         state_put cloud_outage_notified 1 || log "cloud outage flag write failed"
       else
         notify cloud_read_failed "$fails"
