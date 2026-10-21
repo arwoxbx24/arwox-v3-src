@@ -129,6 +129,107 @@ flowchart TB
 
 ---
 
+## Planning Contract
+
+Product Contract preservation: R1–R14 и AE1–AE4 перенесены без изменения смысла; Outstanding Questions закрыты решениями KTD3, KTD6, KTD7.
+
+### Key Technical Decisions
+
+- KTD1. Один bash-скрипт `landing/b24-landing.sh` с режимами `snapshot`, `verify`, `deploy`, `rollback`; REST через уже установленный `b24`, JSON через `jq`. Новых зависимостей нет. Тест `landing/b24-landing-test.sh` — чёрный ящик с заглушкой `b24` в PATH, по образцу `forms-failover/forms-ctl-test.sh`. Covers R1, R2, R10, R11.
+- KTD2. Раскладка снимка: `landing/site<SITE>/<lid>/` с файлами `block-<id>.draft.html` и `block-<id>.public.html` (ответ `landing.block.getlist` с `get_content=1`, `edit_mode` 1 и 0, байт в байт), `additional-fields.json` (`landing.landing.getadditionalfields`, целиком) и `cssblock.css` (поле `CSSBLOCK_CODE` из него, для правок и диффа). `verify` перечитывает те же методы и сравнивает побайтно. Covers R1, R2, AE1.
+- KTD3. Различие сред задаётся подстановкой при выкладке. В файлах всегда боевой адрес `https://forms.arwox.ru/`. `deploy dev` меняет его на `https://forms-test.arwox.ru/` и отказывает, если после подстановки хоть один `action=` формы ведёт на другой адрес. `noindex` — настройка сайта 80, выкладка её не трогает. Covers R5, R6, AE2.
+- KTD4. Выкладка: обёртка `<div id="b<id>" …>` снимается, `landing.block.updatecontent` пишет черновик, `landing.landing.update` пишет `CSSBLOCK_CODE`, `landing.landing.publication` публикует. Успех — перечитанный публичный блок совпадает с выложенным содержимым. Если Битрикс24 нормализует HTML (выясняет U3), сравнение идёт по маркеру релиза `data-release="<sha>"`. Covers R10, AE3.
+- KTD5. Перед записью в прод живое состояние снимается и сравнивается с файлами последнего тега `landing-prod-*`. Расхождение (правка в редакторе мимо репозитория) останавливает выкладку: сначала снимок в git по R1. Совпадение означает, что бэкап — сам тег, а откат — `rollback <тег>`, то есть выкладка файлов тега через `git show`. Пока тега `landing-prod-*` нет, база сравнения и отката — файлы `landing/site78` в `main` (снимок PR-1, сверенный `verify 78`). Covers R8, R11.
+- KTD6. Лимит длины CSS — константа скрипта; её значение даёт замер U3. Пока замера нет, действует 65 535 из `site78-releases/2026-07-29/README.md:11`. `deploy` отказывает до записи, если `cssblock.css` длиннее лимита. Как использовать остаток в 800 символов, решают атомы улучшений, не этот план. Covers R12.
+- KTD7. Сайт 80: lid 368 — dev-страница; lid 372 только сохраняется снимком (R4), выкладка её не трогает.
+- KTD8. До первой выкладки на dev формы сайта 80 никто не отправляет. Сейчас они ведут в функцию `codex-w7skc9-quiz-submit` (`d4ehurp1jbpj9de0pd6m`), куда она передаёт заявки, — не проверено. Проверки R12 сверяют адреса форм статически, без отправки. Живая отправка остаётся за `forms-ctl.sh test`. Covers R6.
+- KTD9. Порядок доставки по R3: PR-1 (U1 и U2, только чтение) сливается в `main` раньше любой записи в Битрикс24. U3–U6 идут после слияния PR-1. Ветка `dev` создаётся от `main` после PR-1.
+
+### High-Level Technical Design
+
+*Направление, не спецификация.*
+
+| Режим | Чтение Б24 | Запись Б24 | Цель |
+|---|---|---|---|
+| `snapshot <site> <dir>` | да | нет | файлы KTD2 |
+| `verify <site> <dir>` | да | нет | rc 0 только при побайтном совпадении |
+| `deploy dev` | да | сайт 80, lid 368 | подстановка KTD3 |
+| `deploy prod` | да | сайт 78, lid 362 | KTD5, затем тег |
+| `rollback <tag>` | да | сайт 78, lid 362 | файлы тега |
+
+```mermaid
+sequenceDiagram
+  participant S as b24-landing.sh deploy
+  participant G as git (файлы коммита)
+  participant B as Битрикс24 REST
+  S->>G: файлы lid 362 (блок, cssblock.css)
+  S->>S: dev: подстановка forms-test, проверка action=; длина CSS ≤ лимит
+  S->>B: prod: snapshot + сравнение с последним тегом (стоп при расхождении)
+  S->>B: landing.block.updatecontent (черновик)
+  S->>B: landing.landing.update (CSSBLOCK_CODE)
+  S->>B: landing.landing.publication
+  S->>B: getlist edit_mode=0 → сравнение с выложенным
+  S->>G: prod: git tag landing-prod-<дата>-<sha>
+```
+
+---
+
+## Implementation Units
+
+- U1. **Скрипт снимка и сверки.** Файлы: `landing/b24-landing.sh` (режимы `snapshot`, `verify`), `landing/b24-landing-test.sh`. Решения: KTD1, KTD2. Requirements: R1, R2.
+  - Execution note: сначала тест (красный), потом скрипт.
+  - Test scenarios:
+    - заглушка `b24` отдаёт 2 страницы с 1 блоком каждая → `snapshot` создаёт по 4 файла на страницу, содержимое совпадает с ответом заглушки байт в байт;
+    - после `snapshot` заглушка меняет длину `CSSBLOCK_CODE` → `verify` rc ≠ 0 и называет файл (AE1);
+    - без изменений → `verify` rc 0 и печатает `ok=<N> failed=0`;
+    - заглушка `b24` падает (rc 1) → `snapshot` rc ≠ 0, частичных файлов не оставляет.
+- U2. **Снимок сайтов 78 и 80 в git.** Файлы: `landing/site78/**` (13 страниц), `landing/site80/**` (lid 368, 372), `landing/README.md` (раскладка, команды). Решения: KTD2, KTD7, KTD9. Requirements: R1–R4.
+  - Test expectation: none — данные. Доказательство — вывод `verify 78` и `verify 80` с `failed=0` в теле PR-1.
+- U3. **Замеры на сайте 80 (после слияния PR-1).** Только lid 368, порядок:
+  1. no-op запись: `updatecontent` тем же содержимым черновика, затем `verify 80`;
+  2. автопубликация: публичный блок до и после записи черновика без `publication`;
+  3. нормализация HTML: совпадает ли публичный блок после `publication` с записанным;
+  4. лимит CSS: запись `CSSBLOCK_CODE` длиной 65 535 и 65 536, затем возврат исходного CSS из снимка и `verify 80`.
+
+  Результаты — таблица в `landing/README.md` и значения KTD4, KTD6. Requirements: снимает три пункта Dependencies.
+  - Test expectation: none — замер. Итог — `verify 80` rc 0 после возврата.
+- U4. **Выкладка и откат.** Файлы: `landing/b24-landing.sh` (режимы `deploy`, `rollback`), `landing/b24-landing-test.sh`. Решения: KTD3–KTD6. Requirements: R5, R6, R8, R10, R11.
+  - Test scenarios:
+    - `deploy dev`: заглушка получает `updatecontent` с `forms-test.arwox.ru` во всех 3 `action=` и без `forms.arwox.ru` (AE2);
+    - `deploy dev` по HTML, где одна форма ведёт на чужой адрес → rc ≠ 0, ни одного write-вызова;
+    - CSS длиннее лимита → rc ≠ 0 до записи;
+    - `deploy prod` при живом состоянии, отличном от последнего тега → rc ≠ 0, ни одного write-вызова (KTD5);
+    - публичный блок после публикации не совпадает → скрипт сам выкладывает файлы предыдущего тега (без тега — базу KTD5), сверка с ними совпадает, итог rc ≠ 0 с текстом «откат выполнен» (AE3);
+    - `rollback <тег>`: заглушка получает содержимое файлов этого тега (`git show`), сверка rc 0.
+- U5. **Проверки dev-страницы.** Режим `check <url>` в том же скрипте: 15 секций в порядке Appendix, 3 `action=` форм на адрес среды, длина CSS ≤ лимит. Консоль и ширина экрана проверяются браузером (`ce-test-browser`), без отправки форм. Решения: KTD8. Requirements: R12.
+  - Test scenarios: HTML-фикстура с переставленными секциями → rc ≠ 0 с именем секции; 2 из 3 форм на `forms-test` → rc ≠ 0.
+  - Живой шаг (после слияния U4): `deploy dev` файлов `landing/site78/362` на lid 368, затем `check https://b24-w7skc9.bitrix24site.ru/`. Вывод обеих команд — в тело PR; это доказательство строки «адреса форм dev». Requirements: R5, R12.
+- U6. **Ветка `dev` и правила агентам.** Ветка `dev` от `main` после PR-1. В `AGENTS.md` — раздел «Лендинг dev/prod»: среды, поток R7, правило R1–R3, команды, проверки R12, запреты R13. Строка доставки `AGENTS.md:43` получает маршрут «GitHub напрямую». Requirements: R7, R9, R13, R14, AE4.
+  - Test expectation: none — документ и ветка. Проверка — `git ls-remote origin dev` и `grep -n` по разделу.
+
+Зависимости: U1 → U2 → (PR-1 слит) → U3 → U4 → U5; U6 после PR-1.
+
+---
+
+## Verification Contract
+
+| Проверка | Команда | Ожидание |
+|---|---|---|
+| тесты скрипта | `bash landing/b24-landing-test.sh` | все сценарии PASS, rc 0 |
+| снимок прода совпадает с живым | `bash landing/b24-landing.sh verify 78 landing/site78` | `failed=0`, rc 0 |
+| снимок dev совпадает с живым (в PR-1, до живого шага U5) | `bash landing/b24-landing.sh verify 80 landing/site80` | `failed=0`, rc 0 |
+| PR-1 до записи | `gh pr view <PR-1> --json state,mergedAt` | MERGED раньше первого write-вызова U3 |
+| адреса форм dev (после `deploy dev`, U5) | `bash landing/b24-landing.sh check https://b24-w7skc9.bitrix24site.ru/` | 3 из 3 на `forms-test` |
+| ветка dev | `git ls-remote origin dev` | одна строка |
+
+## Definition of Done
+
+- Все 6 проверок Verification Contract дали ожидаемый результат, их вывод лежит в телах PR.
+- Три пункта Dependencies / Assumptions заменены замерами U3.
+- Прод (сайт 78) не получил ни одного write-вызова: в этом плане выкладка на прод не запускается, потому что изменений содержимого нет.
+
+---
+
 <!-- ce-section: work-relationships -->
 ## How This Work Fits Together
 
