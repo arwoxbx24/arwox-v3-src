@@ -124,7 +124,7 @@ PROD_INNER=$'<section id="hero">Тарифы "q"\n<form action="https://forms.ar
 NEW_INNER=${PROD_INNER//Тарифы/Цены}
 PROD_CSS=$'.p{color:red}\n/* Ж */'
 DEV_BLOCK='<div id="b9220" class="block-wrapper">old dev</div>'
-BASE_TAG=landing-prod-20260101-000000-base
+BASE_TAG=landing-prod-20260101-000000-abc1234
 
 git_() { git -C "$TMP/repo" "$@"; }
 in_repo() { (cd "$TMP/repo" && run "$@" 2>&1); }
@@ -337,6 +337,36 @@ if [ "$rc" -eq 0 ] && [ "$(block_at 362-0)" = "$(wrapped 9116 "$NEW_INNER")" ]; 
   ok 'deploy prod on a half-written page (each part = tag or target) -> completes'
 else
   bad "deploy prod on a half-written page (each part = tag or target) -> completes (rc=$rc) $out"
+fi
+
+# 20. rollback with a revision suffix on an existing tag -> refused, nothing written
+repo_setup
+out=$(in_repo rollback "$BASE_TAG~1"); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'refused' <<<"$out"; then
+  ok 'rollback <tag>~1 -> refused, 0 writes'
+else
+  bad "rollback <tag>~1 -> refused, 0 writes (rc=$rc) $out"
+fi
+
+# 21. deploy dev with an uncommitted change in landing/site78/362 -> refused, nothing written
+repo_setup
+printf '.changed{}' > "$TMP/repo/landing/site78/362/cssblock.css"
+out=$(in_repo deploy dev); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'uncommitted' <<<"$out"; then
+  ok 'deploy dev, uncommitted change in site78/362 -> refused, 0 writes'
+else
+  bad "deploy dev, uncommitted change in site78/362 -> refused, 0 writes (rc=$rc) $out"
+fi
+
+# 22. verify of an empty dir against a site with no pages -> rc!=0
+setup
+echo '[]' > "$TMP/stub/pages.json"
+mkdir -p "$TMP/emptydir"
+out=$(run verify 80 "$TMP/emptydir" 2>&1); rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok 'verify, empty dir and site without pages -> rc!=0'
+else
+  bad "verify, empty dir and site without pages -> rc!=0 (rc=$rc) $out"
 fi
 
 printf 'pass=%d fail=%d\n' "$PASS" "$FAIL"

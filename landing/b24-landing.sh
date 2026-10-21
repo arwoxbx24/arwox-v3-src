@@ -41,7 +41,7 @@ fetch_site() {
 snapshot() {
   local site=$1 dir=${2%/} tmp
   mkdir -p "$(dirname "$dir")"
-  tmp=$(mktemp -d "$dir.tmp.XXXXXX")
+  tmp=$(mktemp -d "$dir.tmp.XXXXXX") || { printf 'snapshot site %s: mktemp failed, nothing written\n' "$site" >&2; return 1; }
   if ! fetch_site "$site" "$tmp"; then
     rm -rf "$tmp"
     printf 'snapshot site %s: b24 failed, nothing written\n' "$site" >&2
@@ -53,19 +53,22 @@ snapshot() {
 }
 
 verify() {
-  local site=$1 dir=${2%/} tmp f okn=0 failn=0
+  local site=$1 dir=${2%/} tmp f files okn=0 failn=0
   [ -d "$dir" ] || { printf 'verify: no snapshot dir %s\n' "$dir" >&2; return 2; }
-  tmp=$(mktemp -d /tmp/b24-landing-verify.XXXXXX)
+  tmp=$(mktemp -d /tmp/b24-landing-verify.XXXXXX) || { printf 'verify site %s: mktemp failed\n' "$site" >&2; return 1; }
   trap 'rm -rf "$tmp"' RETURN
   fetch_site "$site" "$tmp" || { printf 'verify site %s: b24 failed\n' "$site" >&2; return 1; }
+  files=$({ (cd "$dir" && find . -type f); (cd "$tmp" && find . -type f); } | sed 's|^\./||' | sort -u) || { printf 'verify site %s: cannot list files\n' "$site" >&2; return 1; }
   while IFS= read -r f; do
+    [ -n "$f" ] || continue
     if [ -f "$dir/$f" ] && [ -f "$tmp/$f" ] && cmp -s "$dir/$f" "$tmp/$f"; then
       okn=$((okn + 1))
     else
       failn=$((failn + 1))
       printf 'FAIL %s\n' "$f"
     fi
-  done < <({ (cd "$dir" && find . -type f); (cd "$tmp" && find . -type f); } | sed 's|^\./||' | sort -u)
+  done <<<"$files"
+  [ $((okn + failn)) -gt 0 ] || { printf 'verify site %s: nothing compared\n' "$site" >&2; return 1; }
   printf 'ok=%d failed=%d\n' "$okn" "$failn"
   [ "$failn" -eq 0 ]
 }
@@ -188,9 +191,9 @@ deploy_prod() {
 
 rollback() {  # <tag>: prod page 362 <- the main page of a landing-prod-* tag
   local tag=$1
-  case "$tag" in landing-prod-*) ;; *) fail "refused: $tag is not a landing-prod-* tag" ;; esac
+  [[ $tag =~ ^landing-prod-[0-9]{8}-[0-9]{6}-[0-9a-f]+$ ]] || fail "refused: $tag is not a landing-prod-* tag"
   git fetch -q --tags origin || fail 'git fetch origin failed; nothing written'
-  git rev-parse -q --verify "refs/tags/$tag" > /dev/null || fail "refused: no tag $tag"
+  git show-ref --verify -q "refs/tags/$tag" || fail "refused: no tag $tag"
   to_prod "$tag"
 }
 
