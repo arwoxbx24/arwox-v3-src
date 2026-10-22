@@ -101,7 +101,7 @@ files_at() {  # <rev> <dir>: the main page at <rev> -> <dir>/content.html (block
   blocks=$(git ls-tree --name-only "$rev" "$SRC/" | grep -E '/block-[0-9]+\.draft\.html$') || fail "$rev: no draft block in $SRC"
   [ "$(printf '%s\n' "$blocks" | wc -l)" -eq 1 ] || fail "$rev: more than one draft block in $SRC"
   mkdir -p "$dir"
-  git cat-file blob "$rev:$blocks" | jq -j -R -s "$UNWRAP" > "$dir/content.html" || return 1
+  git cat-file blob "$rev:$blocks" | jq -n -j --rawfile s /dev/stdin '$s | '"$UNWRAP" > "$dir/content.html" || return 1
   git cat-file blob "$rev:$SRC/cssblock.css" > "$dir/style.css" || return 1
 }
 
@@ -178,7 +178,7 @@ deploy_dev() {
   robots=$(b24 landing.landing.getadditionalfields "lid=$DEV_LID" | jq -r '.METAROBOTS_INDEX // "?"') || fail "refused: cannot read dev page $DEV_LID additional fields; nothing written"
   [ "$robots" = N ] || fail "refused: dev page $DEV_LID METAROBOTS_INDEX=$robots, must be N (closed from search); nothing written"
   files_at HEAD "$WORK/new" || exit 1
-  jq -j -R -s 'split("forms.arwox.ru") | join("forms-test.arwox.ru")' "$WORK/new/content.html" > "$WORK/dev.html" || exit 1
+  jq -n -j --rawfile s "$WORK/new/content.html" '$s | split("forms.arwox.ru") | join("forms-test.arwox.ru")' > "$WORK/dev.html" || exit 1
   mv "$WORK/dev.html" "$WORK/new/content.html" || exit 1
   ready "$WORK/new" "$TEST_FORMS" || exit 1
   upload "$DEV_LID" "$WORK/new" || fail "dev page $DEV_LID: write failed; snapshot $DEV_SITE $DEV_DIR, commit, then deploy dev again"
@@ -212,7 +212,7 @@ check() {  # <url>: 15 sections in order, 3/3 forms on the address of its enviro
   good=$({ grep -o -F "action=\"$forms\"" "$WORK/page.html" || true; } | wc -l)
   [ "$total" -eq 3 ] && [ "$good" -eq 3 ] || { printf 'FAIL forms=%s/3 post to %s (action= on the page: %s)\n' "$good" "$forms" "$total"; bad=1; }
   if grep -q -F '<style type="text/css">' "$WORK/page.html"; then
-    bytes=$(jq -j -R -s 'split("<style type=\"text/css\">") | last | split("</style>") | first' "$WORK/page.html" | wc -c)
+    bytes=$(jq -n -j --rawfile s "$WORK/page.html" '$s | split("<style type=\"text/css\">") | last | split("</style>") | first' | wc -c)
     [ "$bytes" -le "$LIMIT" ] || { printf 'FAIL css=%s bytes, the field keeps %s\n' "$bytes" "$LIMIT"; bad=1; }
   else
     printf 'FAIL css: no <style type="text/css"> on the page\n'

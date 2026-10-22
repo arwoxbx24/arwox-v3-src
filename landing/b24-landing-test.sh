@@ -406,5 +406,21 @@ else
   bad "check prod page: noindex -> FAIL, clean -> ok (rc=$rc rc2=$rc2) $out $out2"
 fi
 
+# 27. deploy dev with >=100 KB of Cyrillic: jq raw input must not corrupt it (no U+FFFD, byte-exact).
+# jq 1.7 `-R -s` reads raw input in chunks and mangles a multibyte char split at a chunk boundary;
+# `-n --rawfile` is byte-exact. A phrase long enough to cross many boundaries makes the old code corrupt.
+BIG_CYR=$(printf 'Стоимость услуг по тарифам звоните нам %.0s' {1..3000})
+PROD_INNER=$'<section id="hero">'"$BIG_CYR"$'<form action="https://forms.arwox.ru/">a</form><form action="https://forms.arwox.ru/">b</form><form action="https://forms.arwox.ru/">c</form></section>'
+repo_setup
+out=$(in_repo deploy dev); rc=$?
+sent=$(jq -j '.content' "$TMP/stub/sent-landing.block.updatecontent.json" 2>/dev/null)
+if [ "$rc" -eq 0 ] && [ "$(printf '%s' "$PROD_INNER" | wc -c)" -ge 102400 ] \
+  && [ "$sent" = "${PROD_INNER//forms.arwox.ru/forms-test.arwox.ru}" ] \
+  && ! grep -q -F '�' <<<"$sent"; then
+  ok 'deploy dev with >=100 KB Cyrillic -> content byte-exact, no U+FFFD'
+else
+  bad "deploy dev with >=100 KB Cyrillic -> content byte-exact, no U+FFFD (rc=$rc bytes=$(printf '%s' "$sent" | wc -c)) $out"
+fi
+
 printf 'pass=%d fail=%d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
