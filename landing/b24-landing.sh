@@ -2,10 +2,10 @@
 # Landing pages of a Bitrix24 site <-> files in git. Reads and writes REST via the installed `b24` CLI.
 #   snapshot <site> <dir>  save every page of the site into <dir>/<lid>/ (replaces <dir>)
 #   verify   <site> <dir>  re-read the site and compare with <dir> byte by byte
-#   deploy dev             main page files at HEAD -> dev page 368, forms -> forms-test (first: verify 80 = git)
+#   deploy dev             main page files at HEAD + test banner -> dev page 368 (METAROBOTS_INDEX=N), forms -> forms-test
 #   deploy prod            main page files at origin/main -> prod page 362, then a new landing-prod-* tag
 #   rollback <tag>         main page files of a landing-prod-* tag -> prod page 362, then a new tag
-#   check <url>            live page: 15 sections in order, 3/3 forms on its forms address, CSS size
+#   check <url>            live page: 15 sections, 3/3 forms, CSS size, test page noindex+banner, prod page neither
 # Files per page: block-<id>.draft.html, block-<id>.public.html (getlist content as returned),
 # additional-fields.json (getadditionalfields as returned), cssblock.css (its CSSBLOCK_CODE).
 set -euo pipefail
@@ -79,6 +79,7 @@ verify() {
 LIMIT=65535
 PROD_FORMS='https://forms.arwox.ru/'
 TEST_FORMS='https://forms-test.arwox.ru/'
+TEST_BANNER='<div data-env="test" style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#c00;color:#fff;text-align:center;font:700 14px/1.6 Arial,sans-serif;padding:2px 8px;pointer-events:none">ТЕСТОВЫЙ САЙТ — это не arwox.ru</div>'
 SRC=landing/site78/362
 PROD_LID=362
 DEV_SITE=80
@@ -171,13 +172,15 @@ to_prod() {  # <rev>: prod page 362 <- the main page at <rev>, then a new landin
 }
 
 deploy_dev() {
-  local dirty
+  local dirty robots
   dirty=$(git status --porcelain -- "$SRC" "$DEV_DIR")
   [ -z "$dirty" ] || fail "refused: uncommitted changes in $SRC or $DEV_DIR (repo first); nothing written"
   ( verify "$DEV_SITE" "$DEV_DIR" ) || fail "refused: live site $DEV_SITE differs from $DEV_DIR; snapshot $DEV_SITE $DEV_DIR, commit, then deploy dev; nothing written"
+  robots=$(b24 landing.landing.getadditionalfields "lid=$DEV_LID" | jq -r '.METAROBOTS_INDEX // "?"') || fail "refused: cannot read dev page $DEV_LID additional fields; nothing written"
+  [ "$robots" = N ] || fail "refused: dev page $DEV_LID METAROBOTS_INDEX=$robots, must be N (closed from search); nothing written"
   files_at HEAD "$WORK/new" || exit 1
   jq -j -R -s 'split("forms.arwox.ru") | join("forms-test.arwox.ru")' "$WORK/new/content.html" > "$WORK/dev.html" || exit 1
-  mv "$WORK/dev.html" "$WORK/new/content.html"
+  { printf '%s' "$TEST_BANNER"; cat "$WORK/dev.html"; } > "$WORK/new/content.html" || exit 1
   ready "$WORK/new" "$TEST_FORMS" || exit 1
   upload "$DEV_LID" "$WORK/new" || fail "dev page $DEV_LID: write failed; snapshot $DEV_SITE $DEV_DIR, commit, then deploy dev again"
   printf 'dev: page %s = %s; next: snapshot %s %s and commit\n' "$DEV_LID" "$(git rev-parse --short HEAD)" "$DEV_SITE" "$DEV_DIR"
@@ -197,11 +200,11 @@ rollback() {  # <tag>: prod page 362 <- the main page of a landing-prod-* tag
   to_prod "$tag"
 }
 
-check() {  # <url>: 15 sections in order, 3/3 forms on the address of its environment, CSS within the field
-  local url=$1 forms got total good bytes=0 bad=0
+check() {  # <url>: 15 sections in order, 3/3 forms on the address of its environment, CSS within the field, robots banner
+  local url=$1 forms got total good bytes=0 bad=0 env robots banner
   case "$url" in
-    http*://arwox.ru*|http*://www.arwox.ru*) forms=$PROD_FORMS ;;
-    *) forms=$TEST_FORMS ;;
+    http*://arwox.ru*|http*://www.arwox.ru*) forms=$PROD_FORMS; env=prod ;;
+    *) forms=$TEST_FORMS; env=test ;;
   esac
   curl -fsSL "$url" > "$WORK/page.html" || fail "check: cannot fetch $url"
   got=$({ grep -o -E " id=\"(${SECTIONS// /|})\"" "$WORK/page.html" || true; } | cut -d'"' -f2 | tr '\n' ' ')
@@ -216,8 +219,17 @@ check() {  # <url>: 15 sections in order, 3/3 forms on the address of its enviro
     printf 'FAIL css: no <style type="text/css"> on the page\n'
     bad=1
   fi
+  if [ "$env" = test ]; then
+    robots=noindex; banner=yes
+    grep -q -F '<meta name="robots" content="noindex"' "$WORK/page.html" || { printf 'FAIL robots: no noindex meta on the test page\n'; bad=1; }
+    grep -q -F 'data-env="test"' "$WORK/page.html" || { printf 'FAIL banner: no data-env="test" on the test page\n'; bad=1; }
+  else
+    robots=index; banner=no
+    grep -q -E '<meta[^>]*name="robots"[^>]*noindex' "$WORK/page.html" && { printf 'FAIL robots: noindex on the prod page\n'; bad=1; }
+    grep -q -F 'data-env="test"' "$WORK/page.html" && { printf 'FAIL banner: data-env="test" on the prod page\n'; bad=1; }
+  fi
   [ "$bad" -eq 0 ] || return 1
-  printf 'ok sections=15 forms=3/3 css=%s\n' "$bytes"
+  printf 'ok sections=15 forms=3/3 css=%s robots=%s banner=%s\n' "$bytes" "$robots" "$banner"
 }
 
 case "${1:-}" in

@@ -123,6 +123,7 @@ export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_
 PROD_INNER=$'<section id="hero">Тарифы "q"\n<form action="https://forms.arwox.ru/">a</form><form action="https://forms.arwox.ru/">b</form><form action="https://forms.arwox.ru/">c</form></section>'
 NEW_INNER=${PROD_INNER//Тарифы/Цены}
 PROD_CSS=$'.p{color:red}\n/* Ж */'
+BANNER='<div data-env="test" style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#c00;color:#fff;text-align:center;font:700 14px/1.6 Arial,sans-serif;padding:2px 8px;pointer-events:none">ТЕСТОВЫЙ САЙТ — это не arwox.ru</div>'
 DEV_BLOCK='<div id="b9220" class="block-wrapper">old dev</div>'
 BASE_TAG=landing-prod-20260101-000000-abc1234
 
@@ -170,7 +171,8 @@ new_release() {
 repo_setup
 out=$(in_repo deploy dev); rc=$?
 sent=$(jq -j '.content' "$TMP/stub/sent-landing.block.updatecontent.json" 2>/dev/null)
-if [ "$rc" -eq 0 ] && [ "$sent" = "${PROD_INNER//forms.arwox.ru/forms-test.arwox.ru}" ] \
+sent_body=${sent#"$BANNER"}
+if [ "$rc" -eq 0 ] && [ "${sent:0:${#BANNER}}" = "$BANNER" ] && [ "$sent_body" = "${PROD_INNER//forms.arwox.ru/forms-test.arwox.ru}" ] \
   && [ "$(grep -o -F 'action="https://forms-test.arwox.ru/"' <<<"$sent" | wc -l)" -eq 3 ] \
   && ! grep -q -F 'forms.arwox.ru' <<<"$sent" \
   && jq -e '.lid == 368 and .block == 9220' "$TMP/stub/sent-landing.block.updatecontent.json" > /dev/null \
@@ -293,17 +295,17 @@ fi
 SECTIONS='hero results demo case why-us process packages integrations partners certificates bitrixgpt tariffs faq websites contact'
 page() { # page <forms url> <section>...: a minimal landing page for the curl stub
   local url=$1 s; shift
-  printf '<html><head><style type="text/css">.a{}</style><style type="text/css">%s</style></head><body>' "$PROD_CSS"
+  printf '<html><head><meta name="robots" content="noindex" /><style type="text/css">.a{}</style><style type="text/css">%s</style></head><body>' "$PROD_CSS"
   for s in "$@"; do printf '<section id="%s"></section>' "$s"; done
   printf '<form action="%s"></form>' "$url" "$url" "$url"
-  printf '</body></html>'
+  printf '%s</body></html>' "$BANNER"
 }
 
 # 16. check of the dev page: 15 sections in order, 3/3 forms on forms-test, CSS size
 setup
 page https://forms-test.arwox.ru/ $SECTIONS > "$TMP/stub/page.html"
 out=$(run check https://b24-w7skc9.bitrix24site.ru/ 2>&1); rc=$?
-if [ "$rc" -eq 0 ] && grep -q "^ok sections=15 forms=3/3 css=$(printf '%s' "$PROD_CSS" | wc -c)$" <<<"$out"; then
+if [ "$rc" -eq 0 ] && grep -q "^ok sections=15 forms=3/3 css=$(printf '%s' "$PROD_CSS" | wc -c) robots=noindex banner=yes$" <<<"$out"; then
   ok 'check dev page -> ok sections=15 forms=3/3 css=N'
 else
   bad "check dev page -> ok sections=15 forms=3/3 css=N (rc=$rc) $out"
@@ -367,6 +369,60 @@ if [ "$rc" -ne 0 ]; then
   ok 'verify, empty dir and site without pages -> rc!=0'
 else
   bad "verify, empty dir and site without pages -> rc!=0 (rc=$rc) $out"
+fi
+
+# 23. deploy dev content starts with the banner; deploy prod content has no banner
+repo_setup
+out=$(in_repo deploy dev); rc=$?
+dev_sent=$(jq -j '.content' "$TMP/stub/sent-landing.block.updatecontent.json" 2>/dev/null)
+dev_body=${dev_sent#"$BANNER"}
+out2=$(in_repo deploy prod); rc2=$?
+prod_sent=$(jq -j '.content' "$TMP/stub/sent-landing.block.updatecontent.json" 2>/dev/null)
+if [ "$rc" -eq 0 ] && [ "${dev_sent:0:${#BANNER}}" = "$BANNER" ] && [ "$dev_body" = "${PROD_INNER//forms.arwox.ru/forms-test.arwox.ru}" ] \
+  && [ "$rc2" -eq 0 ] && [ "$prod_sent" = "$PROD_INNER" ] && ! grep -q -F 'data-env="test"' <<<"$prod_sent"; then
+  ok 'deploy dev content starts with the banner; deploy prod content has none'
+else
+  bad "deploy dev content starts with the banner; deploy prod content has none (rc=$rc rc2=$rc2) $out $out2"
+fi
+
+# 24. deploy dev with METAROBOTS_INDEX=Y -> refused, nothing written
+repo_setup
+jq -n '{CSSBLOCK_CODE:".d{}",METAROBOTS_INDEX:"Y"}' > "$TMP/stub/af-368.json"
+in_repo snapshot 80 landing/site80 > /dev/null
+git_ add -A
+git_ commit -q -m robots-y
+out=$(in_repo deploy dev); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'METAROBOTS_INDEX=Y' <<<"$out" && grep -q 'must be N' <<<"$out"; then
+  ok 'deploy dev, METAROBOTS_INDEX=Y -> refused, 0 writes'
+else
+  bad "deploy dev, METAROBOTS_INDEX=Y -> refused, 0 writes (rc=$rc) $out"
+fi
+
+# 25. check dev page without noindex -> FAIL; with noindex and banner -> ok
+setup
+page https://forms-test.arwox.ru/ $SECTIONS | sed 's|<meta name="robots" content="noindex" />||' > "$TMP/stub/page.html"
+out=$(run check https://b24-w7skc9.bitrix24site.ru/ 2>&1); rc=$?
+page https://forms-test.arwox.ru/ $SECTIONS > "$TMP/stub/page.html"
+out2=$(run check https://b24-w7skc9.bitrix24site.ru/ 2>&1); rc2=$?
+if [ "$rc" -ne 0 ] && grep -q 'FAIL robots' <<<"$out" && [ "$rc2" -eq 0 ] && grep -q 'robots=noindex banner=yes' <<<"$out2"; then
+  ok 'check dev page: no noindex -> FAIL, noindex+banner -> ok'
+else
+  bad "check dev page: no noindex -> FAIL, noindex+banner -> ok (rc=$rc rc2=$rc2) $out $out2"
+fi
+
+# 26. check prod page with noindex or with the banner -> FAIL; clean -> ok
+setup
+page https://forms.arwox.ru/ $SECTIONS > "$TMP/stub/page.html"
+out=$(run check https://arwox.ru/ 2>&1); rc=$?
+page https://forms.arwox.ru/ $SECTIONS | sed 's|<meta name="robots" content="noindex" />||' > "$TMP/stub/page.html"
+out2=$(run check https://arwox.ru/ 2>&1); rc2=$?
+page https://forms.arwox.ru/ $SECTIONS | sed 's|<meta name="robots" content="noindex" />||; s|<div data-env="test"[^>]*>[^<]*</div>||' > "$TMP/stub/page.html"
+out3=$(run check https://arwox.ru/ 2>&1); rc3=$?
+if [ "$rc" -ne 0 ] && grep -q 'FAIL robots' <<<"$out" && [ "$rc2" -ne 0 ] && grep -q 'FAIL banner' <<<"$out2" \
+  && [ "$rc3" -eq 0 ] && grep -q 'robots=index banner=no' <<<"$out3"; then
+  ok 'check prod page: noindex -> FAIL, banner -> FAIL, clean -> ok'
+else
+  bad "check prod page: noindex -> FAIL, banner -> FAIL, clean -> ok (rc=$rc rc2=$rc2 rc3=$rc3) $out $out2 $out3"
 fi
 
 printf 'pass=%d fail=%d\n' "$PASS" "$FAIL"
