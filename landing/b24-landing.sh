@@ -2,10 +2,10 @@
 # Landing pages of a Bitrix24 site <-> files in git. Reads and writes REST via the installed `b24` CLI.
 #   snapshot <site> <dir>  save every page of the site into <dir>/<lid>/ (replaces <dir>)
 #   verify   <site> <dir>  re-read the site and compare with <dir> byte by byte
-#   deploy dev             main page files at HEAD -> dev page 368, forms -> forms-test (first: verify 80 = git)
+#   deploy dev             main page files at HEAD -> dev page 368 (METAROBOTS_INDEX=N), forms -> forms-test
 #   deploy prod            main page files at origin/main -> prod page 362, then a new landing-prod-* tag
 #   rollback <tag>         main page files of a landing-prod-* tag -> prod page 362, then a new tag
-#   check <url>            live page: 15 sections in order, 3/3 forms on its forms address, CSS size
+#   check <url>            live page: 15 sections, 3/3 forms, CSS size, test page noindex, prod page index
 # Files per page: block-<id>.draft.html, block-<id>.public.html (getlist content as returned),
 # additional-fields.json (getadditionalfields as returned), cssblock.css (its CSSBLOCK_CODE).
 set -euo pipefail
@@ -101,7 +101,7 @@ files_at() {  # <rev> <dir>: the main page at <rev> -> <dir>/content.html (block
   blocks=$(git ls-tree --name-only "$rev" "$SRC/" | grep -E '/block-[0-9]+\.draft\.html$') || fail "$rev: no draft block in $SRC"
   [ "$(printf '%s\n' "$blocks" | wc -l)" -eq 1 ] || fail "$rev: more than one draft block in $SRC"
   mkdir -p "$dir"
-  git cat-file blob "$rev:$blocks" | jq -j -R -s "$UNWRAP" > "$dir/content.html" || return 1
+  git cat-file blob "$rev:$blocks" | jq -n -j --rawfile s /dev/stdin '$s | '"$UNWRAP" > "$dir/content.html" || return 1
   git cat-file blob "$rev:$SRC/cssblock.css" > "$dir/style.css" || return 1
 }
 
@@ -171,13 +171,15 @@ to_prod() {  # <rev>: prod page 362 <- the main page at <rev>, then a new landin
 }
 
 deploy_dev() {
-  local dirty
+  local dirty robots
   dirty=$(git status --porcelain -- "$SRC" "$DEV_DIR")
   [ -z "$dirty" ] || fail "refused: uncommitted changes in $SRC or $DEV_DIR (repo first); nothing written"
   ( verify "$DEV_SITE" "$DEV_DIR" ) || fail "refused: live site $DEV_SITE differs from $DEV_DIR; snapshot $DEV_SITE $DEV_DIR, commit, then deploy dev; nothing written"
+  robots=$(b24 landing.landing.getadditionalfields "lid=$DEV_LID" | jq -r '.METAROBOTS_INDEX // "?"') || fail "refused: cannot read dev page $DEV_LID additional fields; nothing written"
+  [ "$robots" = N ] || fail "refused: dev page $DEV_LID METAROBOTS_INDEX=$robots, must be N (closed from search); nothing written"
   files_at HEAD "$WORK/new" || exit 1
-  jq -j -R -s 'split("forms.arwox.ru") | join("forms-test.arwox.ru")' "$WORK/new/content.html" > "$WORK/dev.html" || exit 1
-  mv "$WORK/dev.html" "$WORK/new/content.html"
+  jq -n -j --rawfile s "$WORK/new/content.html" '$s | split("forms.arwox.ru") | join("forms-test.arwox.ru")' > "$WORK/dev.html" || exit 1
+  mv "$WORK/dev.html" "$WORK/new/content.html" || exit 1
   ready "$WORK/new" "$TEST_FORMS" || exit 1
   upload "$DEV_LID" "$WORK/new" || fail "dev page $DEV_LID: write failed; snapshot $DEV_SITE $DEV_DIR, commit, then deploy dev again"
   printf 'dev: page %s = %s; next: snapshot %s %s and commit\n' "$DEV_LID" "$(git rev-parse --short HEAD)" "$DEV_SITE" "$DEV_DIR"
@@ -197,11 +199,11 @@ rollback() {  # <tag>: prod page 362 <- the main page of a landing-prod-* tag
   to_prod "$tag"
 }
 
-check() {  # <url>: 15 sections in order, 3/3 forms on the address of its environment, CSS within the field
-  local url=$1 forms got total good bytes=0 bad=0
+check() {  # <url>: 15 sections in order, 3/3 forms on the address of its environment, CSS within the field, robots
+  local url=$1 forms got total good bytes=0 bad=0 env robots
   case "$url" in
-    http*://arwox.ru*|http*://www.arwox.ru*) forms=$PROD_FORMS ;;
-    *) forms=$TEST_FORMS ;;
+    http*://arwox.ru*|http*://www.arwox.ru*) forms=$PROD_FORMS; env=prod ;;
+    *) forms=$TEST_FORMS; env=test ;;
   esac
   curl -fsSL "$url" > "$WORK/page.html" || fail "check: cannot fetch $url"
   got=$({ grep -o -E " id=\"(${SECTIONS// /|})\"" "$WORK/page.html" || true; } | cut -d'"' -f2 | tr '\n' ' ')
@@ -210,14 +212,21 @@ check() {  # <url>: 15 sections in order, 3/3 forms on the address of its enviro
   good=$({ grep -o -F "action=\"$forms\"" "$WORK/page.html" || true; } | wc -l)
   [ "$total" -eq 3 ] && [ "$good" -eq 3 ] || { printf 'FAIL forms=%s/3 post to %s (action= on the page: %s)\n' "$good" "$forms" "$total"; bad=1; }
   if grep -q -F '<style type="text/css">' "$WORK/page.html"; then
-    bytes=$(jq -j -R -s 'split("<style type=\"text/css\">") | last | split("</style>") | first' "$WORK/page.html" | wc -c)
+    bytes=$(jq -n -j --rawfile s "$WORK/page.html" '$s | split("<style type=\"text/css\">") | last | split("</style>") | first' | wc -c)
     [ "$bytes" -le "$LIMIT" ] || { printf 'FAIL css=%s bytes, the field keeps %s\n' "$bytes" "$LIMIT"; bad=1; }
   else
     printf 'FAIL css: no <style type="text/css"> on the page\n'
     bad=1
   fi
+  if [ "$env" = test ]; then
+    robots=noindex
+    grep -q -F '<meta name="robots" content="noindex"' "$WORK/page.html" || { printf 'FAIL robots: no noindex meta on the test page\n'; bad=1; }
+  else
+    robots=index
+    grep -q -E '<meta[^>]*name="robots"[^>]*noindex' "$WORK/page.html" && { printf 'FAIL robots: noindex on the prod page\n'; bad=1; }
+  fi
   [ "$bad" -eq 0 ] || return 1
-  printf 'ok sections=15 forms=3/3 css=%s\n' "$bytes"
+  printf 'ok sections=15 forms=3/3 css=%s robots=%s\n' "$bytes" "$robots"
 }
 
 case "${1:-}" in

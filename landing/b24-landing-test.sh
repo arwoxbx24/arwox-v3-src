@@ -293,7 +293,7 @@ fi
 SECTIONS='hero results demo case why-us process packages integrations partners certificates bitrixgpt tariffs faq websites contact'
 page() { # page <forms url> <section>...: a minimal landing page for the curl stub
   local url=$1 s; shift
-  printf '<html><head><style type="text/css">.a{}</style><style type="text/css">%s</style></head><body>' "$PROD_CSS"
+  printf '<html><head><meta name="robots" content="noindex" /><style type="text/css">.a{}</style><style type="text/css">%s</style></head><body>' "$PROD_CSS"
   for s in "$@"; do printf '<section id="%s"></section>' "$s"; done
   printf '<form action="%s"></form>' "$url" "$url" "$url"
   printf '</body></html>'
@@ -303,7 +303,7 @@ page() { # page <forms url> <section>...: a minimal landing page for the curl st
 setup
 page https://forms-test.arwox.ru/ $SECTIONS > "$TMP/stub/page.html"
 out=$(run check https://b24-w7skc9.bitrix24site.ru/ 2>&1); rc=$?
-if [ "$rc" -eq 0 ] && grep -q "^ok sections=15 forms=3/3 css=$(printf '%s' "$PROD_CSS" | wc -c)$" <<<"$out"; then
+if [ "$rc" -eq 0 ] && grep -q "^ok sections=15 forms=3/3 css=$(printf '%s' "$PROD_CSS" | wc -c) robots=noindex$" <<<"$out"; then
   ok 'check dev page -> ok sections=15 forms=3/3 css=N'
 else
   bad "check dev page -> ok sections=15 forms=3/3 css=N (rc=$rc) $out"
@@ -367,6 +367,59 @@ if [ "$rc" -ne 0 ]; then
   ok 'verify, empty dir and site without pages -> rc!=0'
 else
   bad "verify, empty dir and site without pages -> rc!=0 (rc=$rc) $out"
+fi
+
+# 24. deploy dev with METAROBOTS_INDEX=Y -> refused, nothing written
+repo_setup
+jq -n '{CSSBLOCK_CODE:".d{}",METAROBOTS_INDEX:"Y"}' > "$TMP/stub/af-368.json"
+in_repo snapshot 80 landing/site80 > /dev/null
+git_ add -A
+git_ commit -q -m robots-y
+out=$(in_repo deploy dev); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'METAROBOTS_INDEX=Y' <<<"$out" && grep -q 'must be N' <<<"$out"; then
+  ok 'deploy dev, METAROBOTS_INDEX=Y -> refused, 0 writes'
+else
+  bad "deploy dev, METAROBOTS_INDEX=Y -> refused, 0 writes (rc=$rc) $out"
+fi
+
+# 25. check dev page without noindex -> FAIL; with noindex -> ok
+setup
+page https://forms-test.arwox.ru/ $SECTIONS | sed 's|<meta name="robots" content="noindex" />||' > "$TMP/stub/page.html"
+out=$(run check https://b24-w7skc9.bitrix24site.ru/ 2>&1); rc=$?
+page https://forms-test.arwox.ru/ $SECTIONS > "$TMP/stub/page.html"
+out2=$(run check https://b24-w7skc9.bitrix24site.ru/ 2>&1); rc2=$?
+if [ "$rc" -ne 0 ] && grep -q 'FAIL robots' <<<"$out" && [ "$rc2" -eq 0 ] && grep -q 'robots=noindex$' <<<"$out2"; then
+  ok 'check dev page: no noindex -> FAIL, noindex -> ok'
+else
+  bad "check dev page: no noindex -> FAIL, noindex -> ok (rc=$rc rc2=$rc2) $out $out2"
+fi
+
+# 26. check prod page with noindex -> FAIL; clean -> ok
+setup
+page https://forms.arwox.ru/ $SECTIONS > "$TMP/stub/page.html"
+out=$(run check https://arwox.ru/ 2>&1); rc=$?
+page https://forms.arwox.ru/ $SECTIONS | sed 's|<meta name="robots" content="noindex" />||' > "$TMP/stub/page.html"
+out2=$(run check https://arwox.ru/ 2>&1); rc2=$?
+if [ "$rc" -ne 0 ] && grep -q 'FAIL robots' <<<"$out" && [ "$rc2" -eq 0 ] && grep -q 'robots=index$' <<<"$out2"; then
+  ok 'check prod page: noindex -> FAIL, clean -> ok'
+else
+  bad "check prod page: noindex -> FAIL, clean -> ok (rc=$rc rc2=$rc2) $out $out2"
+fi
+
+# 27. deploy dev with >=100 KB of Cyrillic: jq raw input must not corrupt it (no U+FFFD, byte-exact).
+# jq 1.7 `-R -s` reads raw input in chunks and mangles a multibyte char split at a chunk boundary;
+# `-n --rawfile` is byte-exact. A phrase long enough to cross many boundaries makes the old code corrupt.
+BIG_CYR=$(printf 'Стоимость услуг по тарифам звоните нам %.0s' {1..3000})
+PROD_INNER=$'<section id="hero">'"$BIG_CYR"$'<form action="https://forms.arwox.ru/">a</form><form action="https://forms.arwox.ru/">b</form><form action="https://forms.arwox.ru/">c</form></section>'
+repo_setup
+out=$(in_repo deploy dev); rc=$?
+sent=$(jq -j '.content' "$TMP/stub/sent-landing.block.updatecontent.json" 2>/dev/null)
+if [ "$rc" -eq 0 ] && [ "$(printf '%s' "$PROD_INNER" | wc -c)" -ge 102400 ] \
+  && [ "$sent" = "${PROD_INNER//forms.arwox.ru/forms-test.arwox.ru}" ] \
+  && ! grep -q -F '�' <<<"$sent"; then
+  ok 'deploy dev with >=100 KB Cyrillic -> content byte-exact, no U+FFFD'
+else
+  bad "deploy dev with >=100 KB Cyrillic -> content byte-exact, no U+FFFD (rc=$rc bytes=$(printf '%s' "$sent" | wc -c)) $out"
 fi
 
 printf 'pass=%d fail=%d\n' "$PASS" "$FAIL"
