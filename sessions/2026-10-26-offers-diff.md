@@ -13,3 +13,4 @@
 
 ## Журнал
 - Diff: `docs/research/offers-diff/mkdiff.py` (git show b8e1813^ против origin/dev, difflib по пунктам) → `diff.json`: 31 изменение (374:1, 382:1, 384:6, 390:3, 392:6, 394:10, 396:4).
+- Рынок: 8 оферт (Tavily search + extract), сырые данные `docs/research/offers-diff/market-sources.md`. Наблюдение: старый текст ARWOX о ПДн = шаблон delaem-crm.ru (большинство рынка повторяет ошибку) — консенсус рынка не равен закону.
