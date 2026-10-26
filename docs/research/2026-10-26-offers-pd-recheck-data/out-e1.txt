@@ -1,0 +1,2 @@
+sdk-agent: refused check: command grep -c 'не ограничивается условиями договора-оферты' landing/site78/396/block-9304.draft.html landing/site78/396/block-9306.public.html
+code-channel: mode=code form=sdk rc=7
