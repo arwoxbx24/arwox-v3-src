@@ -12,3 +12,4 @@
 5. HTML (светлая тема) → `docs/research/2026-10-26-offers-diff.html`, PR в dev, файл владельцу.
 
 ## Журнал
+- Diff: `docs/research/offers-diff/mkdiff.py` (git show b8e1813^ против origin/dev, difflib по пунктам) → `diff.json`: 31 изменение (374:1, 382:1, 384:6, 390:3, 392:6, 394:10, 396:4).
