@@ -7,14 +7,14 @@
 #   rollback <tag>         main page files of a landing-prod-* tag -> prod page 362, then a new tag
 #   copy-dev <lid>         legal page <lid> of site 78 -> its copy on site 80 (METAROBOTS_INDEX=N), "<lid> <copy>" in landing/dev-lids.txt
 #   deploy-page dev <lid>  legal page files at HEAD -> its dev copy (landing/dev-lids.txt), forms -> forms-test
-#   deploy-page prod <lid> legal page files at origin/main -> page <lid> on site 78, then a new landing-prod-* tag
+#   deploy-page prod <lid>... legal page files at origin/main -> pages <lid> on site 78, then one new landing-prod-* tag
 #   check <url>            live page: 15 sections, 3/3 forms, CSS size, test page noindex, prod page index
 # Files per page: block-<id>.draft.html, block-<id>.public.html (getlist content as returned),
 # additional-fields.json (getadditionalfields as returned), cssblock.css (its CSSBLOCK_CODE).
 set -euo pipefail
 
 usage() {
-  printf 'usage: %s snapshot|verify <site-id> <dir> | deploy dev|prod | deploy-page dev|prod <lid> | copy-dev <lid> | rollback <landing-prod-tag> | check <url>\n' "$(basename "$0")"
+  printf 'usage: %s snapshot|verify <site-id> <dir> | deploy dev|prod | deploy-page dev <lid> | deploy-page prod <lid>... | copy-dev <lid> | rollback <landing-prod-tag> | check <url>\n' "$(basename "$0")"
 }
 
 # fetch_site <site> <dir>: writes all pages into an existing empty <dir>; returns 1 on any error.
@@ -255,10 +255,11 @@ copy_dev() {  # <lid>: legal page <lid> of site 78 -> its copy on site 80 with M
   printf 'dev copy: %s -> %s\n' "$lid" "$newlid"
 }
 
-deploy_page() {  # dev|prod <lid>: legal page <lid> of site 78, files at HEAD -> its dev copy (dev) or page <lid> (prod)
+deploy_page() {  # dev <lid> | prod <lid>...: legal page <lid> of site 78, files at HEAD -> its dev copy (dev) or pages <lid> (prod)
   local env=$1 lid=$2 target dirty robots tags last f
-  [[ $lid =~ ^[0-9]+$ ]] && [ "$lid" != "$PROD_LID" ] && [ -d "landing/site78/$lid" ] || fail "refused: $lid is not a legal page of site 78; nothing written"
   if [ "$env" = dev ]; then
+    [ $# -eq 2 ] || fail 'refused: deploy-page dev takes one lid; nothing written'
+    [[ $lid =~ ^[0-9]+$ ]] && [ "$lid" != "$PROD_LID" ] && [ -d "landing/site78/$lid" ] || fail "refused: $lid is not a legal page of site 78; nothing written"
     [ -f "$DEV_LIDS" ] || fail "refused: no $DEV_LIDS; copy-dev $lid first; nothing written"
     target=$(awk -v l="$lid" '$1 == l { print $2 }' "$DEV_LIDS") || exit 1
     [ -n "$target" ] || fail "refused: $lid has no dev copy in $DEV_LIDS; copy-dev $lid first; nothing written"
@@ -279,15 +280,22 @@ deploy_page() {  # dev|prod <lid>: legal page <lid> of site 78, files at HEAD ->
     tags=$(git tag -l 'landing-prod-*' --sort=-refname)
     last=${tags%%$'\n'*}
     [ -n "$last" ] || fail 'refused: no landing-prod-* tag (landing/README.md: base tag); nothing written'
-    page_files_at "$last" "$lid" "$WORK/old" || exit 1
-    page_files_at HEAD "$lid" "$WORK/new" || exit 1
-    live_page_is "$lid" "$WORK/old" || live_page_is "$lid" "$WORK/new" || fail "refused: live page $lid differs from $last and from HEAD; nothing written"
-    ready "$WORK/new" "$PROD_FORMS" zero-ok || exit 1
-    if ! upload_page "$lid" "$WORK/new"; then
-      upload_page "$lid" "$WORK/old" || fail "write failed, restore failed: page $lid is partly HEAD, partly $last; when Bitrix24 answers, run the same command again"
-      fail "write failed, restored: page $lid = $last"
-    fi
-    tag_prod HEAD "$lid"
+    for lid in "${@:2}"; do
+      [[ $lid =~ ^[0-9]+$ ]] && [ "$lid" != "$PROD_LID" ] && [ -d "landing/site78/$lid" ] || fail "refused: $lid is not a legal page of site 78; nothing written"
+      page_files_at "$last" "$lid" "$WORK/old/$lid" || exit 1
+      page_files_at HEAD "$lid" "$WORK/new/$lid" || exit 1
+      live_page_is "$lid" "$WORK/old/$lid" || live_page_is "$lid" "$WORK/new/$lid" || fail "refused: live page $lid differs from $last and from HEAD; nothing written"
+      ready "$WORK/new/$lid" "$PROD_FORMS" zero-ok || exit 1
+    done
+    done_lids=''
+    for lid in "${@:2}"; do
+      if ! upload_page "$lid" "$WORK/new/$lid"; then
+        upload_page "$lid" "$WORK/old/$lid" || fail "write failed, restore failed: page $lid is partly HEAD, partly $last; already at HEAD: ${done_lids:-none}; when Bitrix24 answers, run the same command again"
+        fail "write failed, restored: page $lid = $last; already at HEAD: ${done_lids:-none}; run the same command again"
+      fi
+      done_lids="${done_lids:+$done_lids }$lid"
+    done
+    tag_prod HEAD "${*:2}"
   fi
 }
 
@@ -341,7 +349,8 @@ case "${1:-}" in
     "$1" "$2" "$3" ;;
   deploy|rollback|check|copy-dev|deploy-page)
     case "$1:$#" in
-      deploy:2|rollback:2|check:2|copy-dev:2|deploy-page:3) ;;
+      deploy:2|rollback:2|check:2|copy-dev:2) ;;
+      deploy-page:[3-9]|deploy-page:[1-9][0-9]*) ;;
       *) usage >&2; exit 2 ;;
     esac
     WORK=$(mktemp -d /tmp/b24-landing.XXXXXX)
@@ -349,7 +358,7 @@ case "${1:-}" in
     case "$1:$2" in
       deploy:dev) to_top; deploy_dev ;;
       deploy:prod) to_top; deploy_prod ;;
-      deploy-page:dev|deploy-page:prod) to_top; deploy_page "$2" "$3" ;;
+      deploy-page:dev|deploy-page:prod) to_top; deploy_page "$2" "${@:3}" ;;
       copy-dev:*) to_top; copy_dev "$2" ;;
       rollback:*) to_top; rollback "$2" ;;
       check:*) check "$2" ;;
