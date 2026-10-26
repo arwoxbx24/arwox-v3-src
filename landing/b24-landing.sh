@@ -5,13 +5,16 @@
 #   deploy dev             main page files at HEAD -> dev page 368 (METAROBOTS_INDEX=N), forms -> forms-test
 #   deploy prod            main page files at origin/main -> prod page 362, then a new landing-prod-* tag
 #   rollback <tag>         main page files of a landing-prod-* tag -> prod page 362, then a new tag
+#   copy-dev <lid>         legal page <lid> of site 78 -> its copy on site 80 (METAROBOTS_INDEX=N), "<lid> <copy>" in landing/dev-lids.txt
+#   deploy-page dev <lid>  legal page files at HEAD -> its dev copy (landing/dev-lids.txt), forms -> forms-test
+#   deploy-page prod <lid> legal page files at origin/main -> page <lid> on site 78, then a new landing-prod-* tag
 #   check <url>            live page: 15 sections, 3/3 forms, CSS size, test page noindex, prod page index
 # Files per page: block-<id>.draft.html, block-<id>.public.html (getlist content as returned),
 # additional-fields.json (getadditionalfields as returned), cssblock.css (its CSSBLOCK_CODE).
 set -euo pipefail
 
 usage() {
-  printf 'usage: %s snapshot|verify <site-id> <dir> | deploy dev|prod | rollback <landing-prod-tag> | check <url>\n' "$(basename "$0")"
+  printf 'usage: %s snapshot|verify <site-id> <dir> | deploy dev|prod | deploy-page dev|prod <lid> | copy-dev <lid> | rollback <landing-prod-tag> | check <url>\n' "$(basename "$0")"
 }
 
 # fetch_site <site> <dir>: writes all pages into an existing empty <dir>; returns 1 on any error.
@@ -84,6 +87,7 @@ PROD_LID=362
 DEV_SITE=80
 DEV_LID=368
 DEV_DIR=landing/site80
+DEV_LIDS=landing/dev-lids.txt
 SECTIONS='hero results demo case why-us process packages integrations partners certificates bitrixgpt tariffs faq websites contact'
 # getlist content = <div id="b<id>" class="...">inside</div>; updatecontent takes the inside.
 UNWRAP='if test("\\A<div id=\"b[0-9]+\" class=\"[^\"]*\">") and endswith("</div>") then sub("\\A<div id=\"b[0-9]+\" class=\"[^\"]*\">"; "") | .[:-6] else error("no block wrapper") end'
@@ -103,6 +107,32 @@ files_at() {  # <rev> <dir>: the main page at <rev> -> <dir>/content.html (block
   mkdir -p "$dir"
   git cat-file blob "$rev:$blocks" | jq -n -j --rawfile s /dev/stdin '$s | '"$UNWRAP" > "$dir/content.html" || return 1
   git cat-file blob "$rev:$SRC/cssblock.css" > "$dir/style.css" || return 1
+}
+
+page_files_at() {  # <rev> <lid> <dir>: draft blocks of legal page <lid> at <rev>, ascending id -> <dir>/<k>.html (block inside), <dir>/style.css
+  local rev=$1 lid=$2 dir=$3 blocks f k=0
+  blocks=$(git ls-tree --name-only "$rev" "landing/site78/$lid/" | grep -E '/block-[0-9]+\.draft\.html$' | sort -t- -k2,2n) || fail "$rev: no draft block in landing/site78/$lid"
+  mkdir -p "$dir"
+  while IFS= read -r f; do
+    k=$((k + 1))
+    git cat-file blob "$rev:$f" | jq -n -j --rawfile s /dev/stdin '$s | '"$UNWRAP" > "$dir/$k.html" || return 1
+  done <<<"$blocks"
+  git cat-file blob "$rev:landing/site78/$lid/cssblock.css" > "$dir/style.css" || return 1
+}
+
+live_page_is() {  # <lid> <dir>: live draft and published blocks (in order) and CSS equal the files of <dir>
+  local lid=$1 dir=$2 mode k n
+  for mode in 1 0; do
+    b24 landing.block.getlist "lid=$lid" "params[edit_mode]=$mode" 'params[get_content]=1' > "$WORK/blocks.json" || return 1
+    n=$(jq length "$WORK/blocks.json") || return 1
+    [ "$n" -eq "$(ls "$dir" | grep -c '\.html$')" ] || return 1
+    for k in $(seq 1 "$n"); do
+      jq -j ".[$((k - 1))].content | $UNWRAP" "$WORK/blocks.json" > "$WORK/live.$k" || return 1
+      cmp -s "$WORK/live.$k" "$dir/$k.html" || return 1
+    done
+  done
+  b24 landing.landing.getadditionalfields "lid=$lid" | jq -j '.CSSBLOCK_CODE // ""' > "$WORK/live.css" || return 1
+  cmp -s "$WORK/live.css" "$dir/style.css"
 }
 
 live_block() {  # <lid> <edit_mode> <out>: the page's only block, inside -> <out>; prints the block id
@@ -130,11 +160,11 @@ live_matches() {  # <lid> <dir>...: live draft, published block and CSS each equ
   [ "$bad" -eq 0 ]
 }
 
-ready() {  # <dir> <forms url>: refuse before any write
+ready() {  # <dir> <forms url> [empty ok]: refuse before any write
   local dir=$1 url=$2 total good bytes
-  total=$({ grep -o 'action=' "$dir/content.html" || true; } | wc -l)
-  good=$({ grep -o -F "action=\"$url\"" "$dir/content.html" || true; } | wc -l)
-  [ "$total" -gt 0 ] && [ "$total" -eq "$good" ] || { printf 'refused: %s of %s form actions post to %s; nothing written\n' "$good" "$total" "$url" >&2; return 1; }
+  total=$({ cat "$dir"/*.html | grep -o 'action=' || true; } | wc -l)
+  good=$({ cat "$dir"/*.html | grep -o -F "action=\"$url\"" || true; } | wc -l)
+  { [ "$total" -gt 0 ] || [ -n "${3:-}" ]; } && [ "$total" -eq "$good" ] || { printf 'refused: %s of %s form actions post to %s; nothing written\n' "$good" "$total" "$url" >&2; return 1; }
   bytes=$(wc -c < "$dir/style.css")
   [ "$bytes" -le "$LIMIT" ] || { printf 'refused: CSS is %s bytes, the field keeps %s; nothing written\n' "$bytes" "$LIMIT" >&2; return 1; }
 }
@@ -150,8 +180,33 @@ upload() {  # <lid> <dir>: draft and CSS <- files, publish, re-read: live = file
   live_matches "$lid" "$dir"
 }
 
+upload_page() {  # <lid> <dir>: draft blocks and CSS <- files (paired by position), publish, re-read: live = files
+  local lid=$1 dir=$2 n k id files
+  b24 landing.block.getlist "lid=$lid" "params[edit_mode]=1" 'params[get_content]=1' > "$WORK/blocks.json" || return 1
+  n=$(jq length "$WORK/blocks.json") || return 1
+  files=$(ls "$dir" | grep -c '\.html$')
+  [ "$n" -eq "$files" ] || { printf 'lid %s: %s draft blocks, files have %s; nothing written\n' "$lid" "$n" "$files" >&2; return 1; }
+  for k in $(seq 1 "$n"); do
+    id=$(jq -r ".[$((k - 1))].id" "$WORK/blocks.json") || return 1
+    jq -n --argjson lid "$lid" --argjson block "$id" --rawfile c "$dir/$k.html" '{lid:$lid,block:$block,content:$c}' > "$WORK/content.json" || return 1
+    b24 landing.block.updatecontent --json-file "$WORK/content.json" > /dev/null || return 1
+  done
+  jq -n --argjson lid "$lid" --rawfile c "$dir/style.css" '{lid:$lid,fields:{ADDITIONAL_FIELDS:{CSSBLOCK_CODE:$c}}}' > "$WORK/css.json" || return 1
+  b24 landing.landing.update --json-file "$WORK/css.json" > /dev/null || return 1
+  b24 landing.landing.publication "lid=$lid" > /dev/null || return 1
+  live_page_is "$lid" "$dir"
+}
+
+tag_prod() {  # <rev> <lid>: a new landing-prod-* tag on <rev> in origin, after page <lid> = <rev>
+  local rev=$1 lid=$2 new
+  new="landing-prod-$(date -u +%Y%m%d-%H%M%S)-$(git rev-parse --short "$rev^{commit}")"
+  git tag "$new" "$rev^{commit}" || fail "page $lid = $rev, but git tag $new failed"
+  git push -q origin "refs/tags/$new" || fail "page $lid = $rev, tag not pushed: git push origin refs/tags/$new"
+  printf 'prod: page %s = %s, tag %s\n' "$lid" "$rev" "$new"
+}
+
 to_prod() {  # <rev>: prod page 362 <- the main page at <rev>, then a new landing-prod-* tag on <rev> in origin
-  local rev=$1 tags last new
+  local rev=$1 tags last
   tags=$(git tag -l 'landing-prod-*' --sort=-refname)
   last=${tags%%$'\n'*}
   [ -n "$last" ] || fail 'refused: no landing-prod-* tag (landing/README.md: base tag); nothing written'
@@ -164,10 +219,7 @@ to_prod() {  # <rev>: prod page 362 <- the main page at <rev>, then a new landin
     upload "$PROD_LID" "$WORK/old" || fail "write failed, restore failed: page $PROD_LID is part $rev, part $last; when Bitrix24 answers, run the same command again"
     fail "write failed, restored: page $PROD_LID = $last"
   fi
-  new="landing-prod-$(date -u +%Y%m%d-%H%M%S)-$(git rev-parse --short "$rev^{commit}")"
-  git tag "$new" "$rev^{commit}" || fail "page $PROD_LID = $rev, but git tag $new failed"
-  git push -q origin "refs/tags/$new" || fail "page $PROD_LID = $rev, tag not pushed: git push origin refs/tags/$new"
-  printf 'prod: page %s = %s, tag %s\n' "$PROD_LID" "$rev" "$new"
+  tag_prod "$rev" "$PROD_LID"
 }
 
 deploy_dev() {
@@ -183,6 +235,53 @@ deploy_dev() {
   ready "$WORK/new" "$TEST_FORMS" || exit 1
   upload "$DEV_LID" "$WORK/new" || fail "dev page $DEV_LID: write failed; snapshot $DEV_SITE $DEV_DIR, commit, then deploy dev again"
   printf 'dev: page %s = %s; next: snapshot %s %s and commit\n' "$DEV_LID" "$(git rev-parse --short HEAD)" "$DEV_SITE" "$DEV_DIR"
+}
+
+copy_dev() {  # <lid>: legal page <lid> of site 78 -> its copy on site 80 with METAROBOTS_INDEX=N, "<lid> <copy>" appended to landing/dev-lids.txt
+  local lid=$1 newlid
+  [[ $lid =~ ^[0-9]+$ ]] && [ "$lid" != "$PROD_LID" ] && [ -d "landing/site78/$lid" ] || fail "refused: $lid is not a legal page of site 78 (landing/site78/<lid>); nothing written"
+  if [ -f "$DEV_LIDS" ] && grep -q "^$lid " "$DEV_LIDS"; then fail "refused: $lid already has a dev copy in $DEV_LIDS; nothing written"; fi
+  newlid=$(b24 landing.landing.copy "lid=$lid" "toSiteId=$DEV_SITE") || fail "copy $lid to site $DEV_SITE failed; nothing written"
+  jq -n --argjson lid "$newlid" '{lid:$lid,fields:{ADDITIONAL_FIELDS:{METAROBOTS_INDEX:"N"}}}' > "$WORK/robots.json" || exit 1
+  b24 landing.landing.update --json-file "$WORK/robots.json" > /dev/null || fail "page $newlid: METAROBOTS_INDEX write failed; copy not in $DEV_LIDS"
+  printf '%s %s\n' "$lid" "$newlid" >> "$DEV_LIDS"
+  printf 'dev copy: %s -> %s\n' "$lid" "$newlid"
+}
+
+deploy_page() {  # dev|prod <lid>: legal page <lid> of site 78, files at HEAD -> its dev copy (dev) or page <lid> (prod)
+  local env=$1 lid=$2 target dirty robots tags last f
+  [[ $lid =~ ^[0-9]+$ ]] && [ "$lid" != "$PROD_LID" ] && [ -d "landing/site78/$lid" ] || fail "refused: $lid is not a legal page of site 78; nothing written"
+  if [ "$env" = dev ]; then
+    [ -f "$DEV_LIDS" ] || fail "refused: no $DEV_LIDS; copy-dev $lid first; nothing written"
+    target=$(awk -v l="$lid" '$1 == l { print $2 }' "$DEV_LIDS") || exit 1
+    [ -n "$target" ] || fail "refused: $lid has no dev copy in $DEV_LIDS; copy-dev $lid first; nothing written"
+    dirty=$(git status --porcelain -- "landing/site78/$lid" "$DEV_LIDS")
+    [ -z "$dirty" ] || fail "refused: uncommitted changes in landing/site78/$lid or $DEV_LIDS (repo first); nothing written"
+    robots=$(b24 landing.landing.getadditionalfields "lid=$target" | jq -r '.METAROBOTS_INDEX // "?"') || fail "refused: cannot read dev page $target additional fields; nothing written"
+    [ "$robots" = N ] || fail "refused: dev page $target METAROBOTS_INDEX=$robots, must be N (closed from search); nothing written"
+    page_files_at HEAD "$lid" "$WORK/new" || exit 1
+    for f in "$WORK/new"/*.html; do
+      jq -n -j --rawfile s "$f" '$s | split("forms.arwox.ru") | join("forms-test.arwox.ru")' > "$WORK/dev.html" && mv "$WORK/dev.html" "$f" || exit 1
+    done
+    ready "$WORK/new" "$TEST_FORMS" zero-ok || exit 1
+    upload_page "$target" "$WORK/new" || fail "dev page $target: write failed; nothing more written"
+    printf 'dev: page %s (copy of %s) = %s\n' "$target" "$lid" "$(git rev-parse --short HEAD)"
+  else
+    git fetch -q --tags origin || fail 'git fetch origin failed; nothing written'
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || fail 'refused: deploy-page prod runs only at origin/main; nothing written'
+    tags=$(git tag -l 'landing-prod-*' --sort=-refname)
+    last=${tags%%$'\n'*}
+    [ -n "$last" ] || fail 'refused: no landing-prod-* tag (landing/README.md: base tag); nothing written'
+    page_files_at "$last" "$lid" "$WORK/old" || exit 1
+    page_files_at HEAD "$lid" "$WORK/new" || exit 1
+    live_page_is "$lid" "$WORK/old" || live_page_is "$lid" "$WORK/new" || fail "refused: live page $lid differs from $last and from HEAD; nothing written"
+    ready "$WORK/new" "$PROD_FORMS" zero-ok || exit 1
+    if ! upload_page "$lid" "$WORK/new"; then
+      upload_page "$lid" "$WORK/old" || fail "write failed, restore failed: page $lid is partly HEAD, partly $last; when Bitrix24 answers, run the same command again"
+      fail "write failed, restored: page $lid = $last"
+    fi
+    tag_prod HEAD "$lid"
+  fi
 }
 
 deploy_prod() {
@@ -233,13 +332,18 @@ case "${1:-}" in
   snapshot|verify)
     [ $# -eq 3 ] || { usage >&2; exit 2; }
     "$1" "$2" "$3" ;;
-  deploy|rollback|check)
-    [ $# -eq 2 ] || { usage >&2; exit 2; }
+  deploy|rollback|check|copy-dev|deploy-page)
+    case "$1:$#" in
+      deploy:2|rollback:2|check:2|copy-dev:2|deploy-page:3) ;;
+      *) usage >&2; exit 2 ;;
+    esac
     WORK=$(mktemp -d /tmp/b24-landing.XXXXXX)
     trap 'rm -rf "$WORK"' EXIT
     case "$1:$2" in
       deploy:dev) to_top; deploy_dev ;;
       deploy:prod) to_top; deploy_prod ;;
+      deploy-page:dev|deploy-page:prod) to_top; deploy_page "$2" "$3" ;;
+      copy-dev:*) to_top; copy_dev "$2" ;;
       rollback:*) to_top; rollback "$2" ;;
       check:*) check "$2" ;;
       *) usage >&2; exit 2 ;;

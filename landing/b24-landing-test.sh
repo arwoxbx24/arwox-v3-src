@@ -53,12 +53,13 @@ case "$method" in
   landing.landing.getList) cat "$STUB/pages.json" ;;
   landing.block.getlist) cat "$STUB/blocks-$lid-$mode.json" ;;
   landing.landing.getadditionalfields) cat "$STUB/af-$lid.json" ;;
+  landing.landing.copy) echo 480; jq -n '{METAROBOTS_INDEX:"Y"}' > "$STUB/af-480.json" ;;
   landing.block.updatecontent)
-    edit --slurpfile p "$file" '.[0].content = "<div id=\"b\(.[0].id)\" class=\"block-wrapper\">" + $p[0].content + "</div>"' "$STUB/blocks-$lid-1.json"; echo true ;;
+    edit --slurpfile p "$file" 'map(if .id == $p[0].block then .content = "<div id=\"b\(.id)\" class=\"block-wrapper\">" + $p[0].content + "</div>" else . end)' "$STUB/blocks-$lid-1.json"; echo true ;;
   landing.landing.update)
-    edit --slurpfile p "$file" '.CSSBLOCK_CODE = $p[0].fields.ADDITIONAL_FIELDS.CSSBLOCK_CODE' "$STUB/af-$lid.json"; echo true ;;
+    edit --slurpfile p "$file" '. + $p[0].fields.ADDITIONAL_FIELDS' "$STUB/af-$lid.json"; echo true ;;
   landing.landing.publication)
-    [ -e "$STUB/stale-public" ] || edit --slurpfile d "$STUB/blocks-$lid-1.json" '.[0].content = $d[0][0].content' "$STUB/blocks-$lid-0.json"; echo true ;;
+    [ -e "$STUB/stale-public" ] || edit --slurpfile d "$STUB/blocks-$lid-1.json" 'reduce range(0; length) as $i (.; .[$i].content = $d[0][$i].content)' "$STUB/blocks-$lid-0.json"; echo true ;;
   *) printf 'unexpected method %s\n' "$method" >&2; exit 1 ;;
 esac
 EOF
@@ -420,6 +421,141 @@ if [ "$rc" -eq 0 ] && [ "$(printf '%s' "$PROD_INNER" | wc -c)" -ge 102400 ] \
   ok 'deploy dev with >=100 KB Cyrillic -> content byte-exact, no U+FFFD'
 else
   bad "deploy dev with >=100 KB Cyrillic -> content byte-exact, no U+FFFD (rc=$rc bytes=$(printf '%s' "$sent" | wc -c)) $out"
+fi
+
+# --- legal pages: page 380 of site 78 (files at the base tag), its dev copy 390 on site 80 (dev-lids.txt) ---
+LEG1='<div id="b9301" class="block-wrapper"><form action="https://forms.arwox.ru/">Политика "q"</form></div>'
+LEG2='<div id="b9302" class="block-wrapper">Текст</div>'
+LEG1_IN='<form action="https://forms-test.arwox.ru/">Политика "q"</form>'
+LEG2_IN='Текст'
+LEG_CSS='.l{color:red}'
+legal_repo() {  # base tag holds 380 (2 draft blocks, CSS); 390 is its dev copy; origin has all
+  setup
+  rm -rf "$TMP/repo" "$TMP/origin.git"
+  mkdir -p "$TMP/repo/landing/site78/380"
+  git init -q -b main "$TMP/repo"
+  printf '%s' "$LEG1" > "$TMP/repo/landing/site78/380/block-9301.draft.html"
+  printf '%s' "$LEG2" > "$TMP/repo/landing/site78/380/block-9302.draft.html"
+  printf '%s' "$LEG_CSS" > "$TMP/repo/landing/site78/380/cssblock.css"
+  echo '380 390' > "$TMP/repo/landing/dev-lids.txt"
+  jq -n --arg a "$LEG1" --arg b "$LEG2" '[{id:9301,content:$a},{id:9302,content:$b}]' > "$TMP/stub/blocks-380-1.json"
+  jq -n --arg a "$LEG1" --arg b "$LEG2" '[{id:9303,content:$a},{id:9304,content:$b}]' > "$TMP/stub/blocks-380-0.json"
+  jq -n --arg c "$LEG_CSS" '{CSSBLOCK_CODE:$c}' > "$TMP/stub/af-380.json"
+  jq -n --arg c "$DEV_BLOCK" '[{id:9311,content:$c},{id:9312,content:$c}]' > "$TMP/stub/blocks-390-1.json"
+  jq -n --arg c "$DEV_BLOCK" '[{id:9313,content:$c},{id:9314,content:$c}]' > "$TMP/stub/blocks-390-0.json"
+  jq -n '{CSSBLOCK_CODE:".d{}",METAROBOTS_INDEX:"N"}' > "$TMP/stub/af-390.json"
+  git_ add -A
+  git_ commit -q -m base
+  git_ tag "$BASE_TAG"
+  git clone -q --bare "$TMP/repo" "$TMP/origin.git"
+  git_ remote add origin "$TMP/origin.git"
+  git_ fetch -q origin
+  : > "$TMP/stub/calls"
+}
+
+# (a) copy-dev 380 -> line "380 480", METAROBOTS_INDEX=N on the copy
+legal_repo
+rm -f "$TMP/repo/landing/dev-lids.txt"
+out=$(in_repo copy-dev 380); rc=$?
+if [ "$rc" -eq 0 ] && grep -qx '380 480' "$TMP/repo/landing/dev-lids.txt" \
+  && jq -e '.METAROBOTS_INDEX == "N"' "$TMP/stub/af-480.json" > /dev/null && grep -q 'copy lid=380' "$TMP/stub/calls"; then
+  ok 'copy-dev 380 -> line "380 480" in dev-lids.txt, METAROBOTS_INDEX=N'
+else
+  bad "copy-dev 380 -> line \"380 480\" in dev-lids.txt, METAROBOTS_INDEX=N (rc=$rc) $out"
+fi
+
+# (b) deploy-page dev 380 with 2 blocks -> both dev blocks = files, published too, prod untouched
+legal_repo
+out=$(in_repo deploy-page dev 380); rc=$?
+dev1=$TMP/stub/blocks-390-1.json; dev0=$TMP/stub/blocks-390-0.json
+if [ "$rc" -eq 0 ] \
+  && [ "$(jq -j '.[0].content' "$dev1")" = "$(wrapped 9311 "$LEG1_IN")" ] \
+  && [ "$(jq -j '.[1].content' "$dev1")" = "$(wrapped 9312 "$LEG2_IN")" ] \
+  && [ "$(jq -j '.[0].content' "$dev0")" = "$(wrapped 9311 "$LEG1_IN")" ] \
+  && [ "$(jq -j '.[1].content' "$dev0")" = "$(wrapped 9312 "$LEG2_IN")" ] \
+  && jq -e --arg c "$LEG_CSS" '.CSSBLOCK_CODE == $c' "$TMP/stub/af-390.json" > /dev/null \
+  && ! grep -q 'lid=380' "$TMP/stub/calls"; then
+  ok 'deploy-page dev 2 blocks -> dev blocks, published and CSS = files, prod untouched'
+else
+  bad "deploy-page dev 2 blocks -> dev blocks, published and CSS = files, prod untouched (rc=$rc) $out"
+fi
+
+# (c) deploy-page dev without a dev-lids line -> refused, 0 writes
+legal_repo
+rm -f "$TMP/repo/landing/dev-lids.txt"
+out=$(in_repo deploy-page dev 380); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'copy-dev' <<<"$out"; then
+  ok 'deploy-page dev, no dev-lids line -> refused, 0 writes'
+else
+  bad "deploy-page dev, no dev-lids line -> refused, 0 writes (rc=$rc) $out"
+fi
+
+# (d) deploy-page dev with METAROBOTS_INDEX=Y on the dev copy -> refused, 0 writes
+legal_repo
+jq -n '{CSSBLOCK_CODE:".d{}",METAROBOTS_INDEX:"Y"}' > "$TMP/stub/af-390.json"
+out=$(in_repo deploy-page dev 380); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'METAROBOTS_INDEX=Y' <<<"$out"; then
+  ok 'deploy-page dev, METAROBOTS_INDEX=Y -> refused, 0 writes'
+else
+  bad "deploy-page dev, METAROBOTS_INDEX=Y -> refused, 0 writes (rc=$rc) $out"
+fi
+
+# (e) deploy-page prod when HEAD is not origin/main -> refused, 0 writes
+legal_repo
+printf '%s' "$LEG_CSS /* local */" > "$TMP/repo/landing/site78/380/cssblock.css"
+git_ commit -q -a -m local-only
+out=$(in_repo deploy-page prod 380); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'origin/main' <<<"$out"; then
+  ok 'deploy-page prod, HEAD not origin/main -> refused, 0 writes'
+else
+  bad "deploy-page prod, HEAD not origin/main -> refused, 0 writes (rc=$rc) $out"
+fi
+
+# (f) deploy-page prod when live differs from the tag and HEAD -> refused, 0 writes
+legal_repo
+jq '.[0].content += " edited"' "$TMP/stub/blocks-380-1.json" > "$TMP/stub/t" && mv "$TMP/stub/t" "$TMP/stub/blocks-380-1.json"
+out=$(in_repo deploy-page prod 380); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'differs' <<<"$out"; then
+  ok 'deploy-page prod, live != tag and != HEAD -> refused, 0 writes'
+else
+  bad "deploy-page prod, live != tag and != HEAD -> refused, 0 writes (rc=$rc) $out"
+fi
+
+# (g) deploy-page prod success -> live = HEAD files, new tag on HEAD in origin
+legal_repo
+printf '%s' '<div id="b9301" class="block-wrapper">Новый текст</div>' > "$TMP/repo/landing/site78/380/block-9301.draft.html"
+git_ commit -q -a -m new
+git -C "$TMP/origin.git" fetch -q "$TMP/repo" main:main
+out=$(in_repo deploy-page prod 380); rc=$?
+tag=$(git -C "$TMP/origin.git" tag -l 'landing-prod-*' --sort=-refname | head -n 1)
+if [ "$rc" -eq 0 ] \
+  && [ "$(jq -j '.[0].content' "$TMP/stub/blocks-380-1.json")" = "$(wrapped 9301 'Новый текст')" ] \
+  && [ "$(jq -j '.[0].content' "$TMP/stub/blocks-380-0.json")" = "$(wrapped 9301 'Новый текст')" ] \
+  && [ "$(git -C "$TMP/origin.git" tag -l 'landing-prod-*' | wc -l)" -eq 2 ] \
+  && [ "$(git -C "$TMP/origin.git" rev-parse "$tag^{commit}")" = "$(git_ rev-parse HEAD)" ]; then
+  ok 'deploy-page prod -> live = HEAD files, new tag on HEAD in origin'
+else
+  bad "deploy-page prod -> live = HEAD files, new tag on HEAD in origin (rc=$rc tag=$tag) $out"
+fi
+
+# (h) block count differs from the files -> refused, 0 writes
+legal_repo
+jq -n --arg c "$DEV_BLOCK" '[{id:9311,content:$c}]' > "$TMP/stub/blocks-390-1.json"
+out=$(in_repo deploy-page dev 380); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'draft blocks' <<<"$out"; then
+  ok 'deploy-page dev, block count differs -> refused, 0 writes'
+else
+  bad "deploy-page dev, block count differs -> refused, 0 writes (rc=$rc) $out"
+fi
+
+# (i) deploy-page with 362 -> refused, 0 writes
+legal_repo
+mkdir -p "$TMP/repo/landing/site78/362"
+out=$(in_repo deploy-page dev 362); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'not a legal page' <<<"$out"; then
+  ok 'deploy-page with 362 -> refused, 0 writes'
+else
+  bad "deploy-page with 362 -> refused, 0 writes (rc=$rc) $out"
 fi
 
 printf 'pass=%d fail=%d\n' "$PASS" "$FAIL"
