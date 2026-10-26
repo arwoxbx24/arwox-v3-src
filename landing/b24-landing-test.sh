@@ -598,5 +598,69 @@ else
   bad "deploy-page prod, published block rewritten by Bitrix24 (lazy img) -> live = HEAD files, new tag (rc=$rc tag=$tag) $out"
 fi
 
+# legal pages 380 (as legal_repo) and 381 (1 block, same CSS) at the base tag; origin has all
+LEG3='<div id="b9401" class="block-wrapper">Условия</div>'
+legal2_repo() {
+  setup
+  rm -rf "$TMP/repo" "$TMP/origin.git"
+  mkdir -p "$TMP/repo/landing/site78/380" "$TMP/repo/landing/site78/381"
+  git init -q -b main "$TMP/repo"
+  printf '%s' "$LEG1" > "$TMP/repo/landing/site78/380/block-9301.draft.html"
+  printf '%s' "$LEG1" > "$TMP/repo/landing/site78/380/block-9301.public.html"
+  printf '%s' "$LEG3" > "$TMP/repo/landing/site78/381/block-9401.draft.html"
+  printf '%s' "$LEG3" > "$TMP/repo/landing/site78/381/block-9401.public.html"
+  printf '%s' "$LEG_CSS" > "$TMP/repo/landing/site78/380/cssblock.css"
+  printf '%s' "$LEG_CSS" > "$TMP/repo/landing/site78/381/cssblock.css"
+  jq -n --arg c "$LEG1" '[{id:9301,content:$c}]' > "$TMP/stub/blocks-380-1.json"
+  jq -n --arg c "$LEG1" '[{id:9303,content:$c}]' > "$TMP/stub/blocks-380-0.json"
+  jq -n --arg c "$LEG3" '[{id:9401,content:$c}]' > "$TMP/stub/blocks-381-1.json"
+  jq -n --arg c "$LEG3" '[{id:9402,content:$c}]' > "$TMP/stub/blocks-381-0.json"
+  jq -n --arg c "$LEG_CSS" '{CSSBLOCK_CODE:$c}' > "$TMP/stub/af-380.json"
+  jq -n --arg c "$LEG_CSS" '{CSSBLOCK_CODE:$c}' > "$TMP/stub/af-381.json"
+  git_ add -A
+  git_ commit -q -m base
+  git_ tag "$BASE_TAG"
+  git clone -q --bare "$TMP/repo" "$TMP/origin.git"
+  git_ remote add origin "$TMP/origin.git"
+  git_ fetch -q origin
+  : > "$TMP/stub/calls"
+}
+
+# (l) deploy-page prod 380 381 -> both live = HEAD files, exactly 1 new tag on HEAD
+legal2_repo
+printf '%s' '<div id="b9301" class="block-wrapper">Новый текст</div>' > "$TMP/repo/landing/site78/380/block-9301.draft.html"
+printf '%s' '<div id="b9301" class="block-wrapper">Новый текст</div>' > "$TMP/repo/landing/site78/380/block-9301.public.html"
+printf '%s' '<div id="b9401" class="block-wrapper">Новые условия</div>' > "$TMP/repo/landing/site78/381/block-9401.draft.html"
+printf '%s' '<div id="b9401" class="block-wrapper">Новые условия</div>' > "$TMP/repo/landing/site78/381/block-9401.public.html"
+git_ commit -q -a -m new
+git -C "$TMP/origin.git" fetch -q "$TMP/repo" main:main
+out=$(in_repo deploy-page prod 380 381); rc=$?
+head=$(git_ rev-parse HEAD)
+if [ "$rc" -eq 0 ] \
+  && [ "$(jq -j '.[0].content' "$TMP/stub/blocks-380-1.json")" = "$(wrapped 9301 'Новый текст')" ] \
+  && [ "$(jq -j '.[0].content' "$TMP/stub/blocks-380-0.json")" = "$(wrapped 9301 'Новый текст')" ] \
+  && [ "$(jq -j '.[0].content' "$TMP/stub/blocks-381-1.json")" = "$(wrapped 9401 'Новые условия')" ] \
+  && [ "$(jq -j '.[0].content' "$TMP/stub/blocks-381-0.json")" = "$(wrapped 9401 'Новые условия')" ] \
+  && [ "$(git -C "$TMP/origin.git" tag -l 'landing-prod-*' | wc -l)" -eq 2 ] \
+  && [ "$(git -C "$TMP/origin.git" tag -l 'landing-prod-*' --points-at "$head" | wc -l)" -eq 1 ]; then
+  ok 'deploy-page prod 2 pages -> both live = HEAD, exactly 1 new tag on HEAD'
+else
+  bad "deploy-page prod 2 pages -> both live = HEAD, exactly 1 new tag on HEAD (rc=$rc) $out"
+fi
+
+# (m) deploy-page prod 380 381, page 381 edited in Bitrix24 -> refused, 0 writes (380 is not written either)
+legal2_repo
+printf '%s' '<div id="b9301" class="block-wrapper">Новый текст</div>' > "$TMP/repo/landing/site78/380/block-9301.draft.html"
+printf '%s' '<div id="b9301" class="block-wrapper">Новый текст</div>' > "$TMP/repo/landing/site78/380/block-9301.public.html"
+git_ commit -q -a -m new
+git -C "$TMP/origin.git" fetch -q "$TMP/repo" main:main
+jq '.[0].content |= sub("Условия"; "Изменено")' "$TMP/stub/blocks-381-1.json" > "$TMP/stub/t" && mv "$TMP/stub/t" "$TMP/stub/blocks-381-1.json"
+out=$(in_repo deploy-page prod 380 381); rc=$?
+if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'live page 381 differs' <<<"$out"; then
+  ok 'deploy-page prod 2 pages, second live != tag and != HEAD -> refused, 0 writes'
+else
+  bad "deploy-page prod 2 pages, second live != tag and != HEAD -> refused, 0 writes (rc=$rc) $out"
+fi
+
 printf 'pass=%d fail=%d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
