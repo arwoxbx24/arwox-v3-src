@@ -168,4 +168,3 @@ Do not record style or wording preferences.
 
 | id | lid | file | clause | verdict | offer words (verbatim) | law words (verbatim) | law URL | proposed fix (old → new) | reason |
 |---|---|---|---|---|---|---|---|---|---|
-sdk-agent: subtype=success cost_usd=0.011070070000000001 cache_read=37442 cache_write=15146
