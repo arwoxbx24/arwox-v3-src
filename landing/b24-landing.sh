@@ -256,7 +256,7 @@ copy_dev() {  # <lid>: legal page <lid> of site 78 -> its copy on site 80 with M
 }
 
 deploy_page() {  # dev <lid> | prod <lid>...: legal page <lid> of site 78, files at HEAD -> its dev copy (dev) or pages <lid> (prod)
-  local env=$1 lid=$2 target dirty robots tags last f
+  local env=$1 lid=$2 target dirty robots tags live tag live_at f
   if [ "$env" = dev ]; then
     [ $# -eq 2 ] || fail 'refused: deploy-page dev takes one lid; nothing written'
     [[ $lid =~ ^[0-9]+$ ]] && [ "$lid" != "$PROD_LID" ] && [ -d "landing/site78/$lid" ] || fail "refused: $lid is not a legal page of site 78; nothing written"
@@ -278,20 +278,35 @@ deploy_page() {  # dev <lid> | prod <lid>...: legal page <lid> of site 78, files
     git fetch -q --tags origin || fail 'git fetch origin failed; nothing written'
     [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || fail 'refused: deploy-page prod runs only at origin/main; nothing written'
     tags=$(git tag -l 'landing-prod-*' --sort=-refname)
-    last=${tags%%$'\n'*}
-    [ -n "$last" ] || fail 'refused: no landing-prod-* tag (landing/README.md: base tag); nothing written'
+    [ -n "$tags" ] || fail 'refused: no landing-prod-* tag (landing/README.md: base tag); nothing written'
     for lid in "${@:2}"; do
       [[ $lid =~ ^[0-9]+$ ]] && [ "$lid" != "$PROD_LID" ] && [ -d "landing/site78/$lid" ] || fail "refused: $lid is not a legal page of site 78; nothing written"
-      page_files_at "$last" "$lid" "$WORK/old/$lid" || exit 1
       page_files_at HEAD "$lid" "$WORK/new/$lid" || exit 1
-      live_page_is "$lid" "$WORK/old/$lid" || live_page_is "$lid" "$WORK/new/$lid" || fail "refused: live page $lid differs from $last and from HEAD; nothing written"
+      # Live may be any released state (the newest tag holds a different page set): match any tag, else HEAD,
+      # and restore to that same state if the write fails.
+      live=''
+      for tag in $tags; do
+        git cat-file -e "$tag:landing/site78/$lid" 2>/dev/null || continue
+        rm -rf "$WORK/old/$lid"
+        page_files_at "$tag" "$lid" "$WORK/old/$lid" || exit 1
+        if live_page_is "$lid" "$WORK/old/$lid"; then live=$tag; break; fi
+      done
+      if [ -z "$live" ]; then
+        rm -rf "$WORK/old/$lid"
+        page_files_at HEAD "$lid" "$WORK/old/$lid" || exit 1
+        live_page_is "$lid" "$WORK/old/$lid" || fail "refused: live page $lid differs from every landing-prod-* tag and from HEAD; nothing written"
+        live=HEAD
+      fi
+      mkdir -p "$WORK/live" || exit 1
+      printf '%s\n' "$live" > "$WORK/live/$lid" || exit 1
       ready "$WORK/new/$lid" "$PROD_FORMS" zero-ok || exit 1
     done
     done_lids=''
     for lid in "${@:2}"; do
+      live_at=$(cat "$WORK/live/$lid") || exit 1
       if ! upload_page "$lid" "$WORK/new/$lid"; then
-        upload_page "$lid" "$WORK/old/$lid" || fail "write failed, restore failed: page $lid is partly HEAD, partly $last; already at HEAD: ${done_lids:-none}; when Bitrix24 answers, run the same command again"
-        fail "write failed, restored: page $lid = $last; already at HEAD: ${done_lids:-none}; run the same command again"
+        upload_page "$lid" "$WORK/old/$lid" || fail "write failed, restore failed: page $lid is partly HEAD, partly $live_at; already at HEAD: ${done_lids:-none}; when Bitrix24 answers, run the same command again"
+        fail "write failed, restored: page $lid = $live_at; already at HEAD: ${done_lids:-none}; run the same command again"
       fi
       done_lids="${done_lids:+$done_lids }$lid"
     done
