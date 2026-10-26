@@ -1,5 +1,5 @@
 import subprocess,re,html,json,difflib,sys
-BASE='b8e1813^'; HEAD='origin/dev'
+BASE='b8e1813^'; HEAD='HEAD'  # после отката 384/390 (26.10) их изменений нет
 pages={'374':'374/block-9242','382':'382/block-9274','384':'384/block-9282','390':'390/block-9294','392':'392/block-9298','394':'394/block-9302','396':'396/block-9306'}
 def text(rev,p):
     s=subprocess.run(['git','show',f'{rev}:landing/site78/{p}.public.html'],capture_output=True,text=True).stdout
