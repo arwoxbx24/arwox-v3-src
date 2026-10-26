@@ -36,7 +36,7 @@ You are a validator, not an editor. Your only job is to find personal-data (152-
   - <!-- src: landing/README.md:10-12 -->
 - The draft and public blocks have separate ids. Measured on dev: a marker written to the draft was absent from the public block until publication.
   - <!-- src: landing/README.md:52-53 -->
-- TODO(lead): the five files do not state the rule "draft must match public". Confirm whether a draft/public mismatch is a finding or only the normal pre-publication state.
+- Draft and public blocks of one page hold the same text in the repo: deploy-page writes the draft and then publishes it, so the public block becomes equal to the draft. A draft/public mismatch in the repo is a finding of type DRIFT.
 
 **Dev copies (from `landing/dev-lids.txt`, lines 1–7):**
 
@@ -52,14 +52,14 @@ You are a validator, not an editor. Your only job is to find personal-data (152-
 
 - <!-- src: landing/dev-lids.txt:1-7 -->
 - The file has no header. Read each line as prod lid, then dev lid.
-  - TODO(lead): confirm the column order.
+  - Column order: as in the findings table in section 5.
 - The site 80 directory lists only lid 368 (dev main) and 372 (snapshot only). Lids 402–414 are not listed there.
-  - TODO(lead): confirm that dev lids 402–414 exist on site 80 before comparing them.
+  - Dev copies are listed in landing/dev-lids.txt; dev page 414 (copy of 396) was written on 2026-10-26 (deploy-page dev 396). Compare other dev pages only if the owner gives their URLs.
   - <!-- src: landing/README.md:8 -->
 
 **Live page URLs:**
 - `landing/site78/384/additional-fields.json` has no page URL field. The page-level fields are in that file, but no per-lid address.
-  - TODO(lead): give the live URL of each prod lid (384, 390, 392, 394, 396) and each dev lid, if dev copies are to be checked.
+  - The owner gives the validator the live URL of each offer page; write every URL you used at the top of the findings file.
   - <!-- src: landing/site78/384/additional-fields.json:1-58 -->
 - Known base addresses only: prod `https://arwox.ru`; dev `https://b24-w7skc9.bitrix24site.ru`.
   - <!-- src: AGENTS.md:44-45 -->
@@ -104,7 +104,7 @@ Do not take these from memory or from the repository alone.
 
 Rules for copying:
 - Keep each non-breaking space (U+00A0) as it is, and add the token `{nbsp}` right after it, so it is visible in the finding.
-  - TODO(lead): the five files do not show whether the offer HTML contains U+00A0. Check on the page.
+  - The offer files do contain U+00A0: lines with it per public block on 2026-10-26 — 384: 1, 390: 3, 392: 7, 394: 15, 396: 1. Keep them in quotes and mark each as {nbsp}.
 - If a quote contains a line break or `|`, join the lines with one space and write `|` as `\|`. Say so in the reason.
 
 **d. Verdict.** Each finding has exactly one verdict:
@@ -124,7 +124,7 @@ Do not record style or wording preferences.
   - <!-- src: AGENTS.md:47 -->
 - **File:** write exactly one file, `docs/validator/offers-findings.md`.
   - <!-- src: TZ dcfg-hfkdm.1 / W1 (path not in the five files)  -->
-  - TODO(lead): none of the five files mention a `docs/validator/` directory. Confirm it exists or may be created.
+  - `docs/validator/` exists in the repo (this instruction file lives there); create offers-findings.md in it.
 - **No push possible:** if you have no repository connector, print the same file content in chat so the owner can hand it over.
   - <!-- src: TZ dcfg-hfkdm.1 / W1 -->
 - **Table:** the findings table uses exactly these columns, in this order:
@@ -152,7 +152,7 @@ Do not record style or wording preferences.
   - <!-- src: AGENTS.md:49 -->
   - `deploy` and `rollback` upload only the main page (362 → 368).
   - <!-- src: landing/README.md:37 -->
-  - TODO(lead): state how accepted edits to lids 384–396 are published, given that they fall outside `deploy`.
+  - Accepted edits are published only by the lead: bash landing/b24-landing.sh deploy-page dev <lid> (one lid, dev copy), then after merge into main deploy-page prod <lid>... at origin/main, which adds a landing-prod-* tag.
 
 ## 7. Self-check before finishing
 
