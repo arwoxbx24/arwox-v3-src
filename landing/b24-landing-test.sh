@@ -59,7 +59,8 @@ case "$method" in
   landing.landing.update)
     edit --slurpfile p "$file" '. + $p[0].fields.ADDITIONAL_FIELDS' "$STUB/af-$lid.json"; echo true ;;
   landing.landing.publication)
-    [ -e "$STUB/stale-public" ] || edit --slurpfile d "$STUB/blocks-$lid-1.json" 'reduce range(0; length) as $i (.; .[$i].content = $d[0][$i].content)' "$STUB/blocks-$lid-0.json"; echo true ;;
+    lazy=false; [ -e "$STUB/lazy-img" ] && lazy=true
+    [ -e "$STUB/stale-public" ] || edit --slurpfile d "$STUB/blocks-$lid-1.json" --argjson lazy "$lazy" 'reduce range(0; length) as $i (.; .[$i].content = ($d[0][$i].content | if $lazy then gsub(" src=\""; " data-lazy-img=\"Y\" data-src=\"") else . end))' "$STUB/blocks-$lid-0.json"; echo true ;;
   *) printf 'unexpected method %s\n' "$method" >&2; exit 1 ;;
 esac
 EOF
@@ -436,6 +437,8 @@ legal_repo() {  # base tag holds 380 (2 draft blocks, CSS); 390 is its dev copy;
   git init -q -b main "$TMP/repo"
   printf '%s' "$LEG1" > "$TMP/repo/landing/site78/380/block-9301.draft.html"
   printf '%s' "$LEG2" > "$TMP/repo/landing/site78/380/block-9302.draft.html"
+  printf '%s' "$LEG1" > "$TMP/repo/landing/site78/380/block-9301.public.html"
+  printf '%s' "$LEG2" > "$TMP/repo/landing/site78/380/block-9302.public.html"
   printf '%s' "$LEG_CSS" > "$TMP/repo/landing/site78/380/cssblock.css"
   echo '380 390' > "$TMP/repo/landing/dev-lids.txt"
   jq -n --arg a "$LEG1" --arg b "$LEG2" '[{id:9301,content:$a},{id:9302,content:$b}]' > "$TMP/stub/blocks-380-1.json"
@@ -524,6 +527,7 @@ fi
 # (g) deploy-page prod success -> live = HEAD files, new tag on HEAD in origin
 legal_repo
 printf '%s' '<div id="b9301" class="block-wrapper">Новый текст</div>' > "$TMP/repo/landing/site78/380/block-9301.draft.html"
+printf '%s' '<div id="b9301" class="block-wrapper">Новый текст</div>' > "$TMP/repo/landing/site78/380/block-9301.public.html"
 git_ commit -q -a -m new
 git -C "$TMP/origin.git" fetch -q "$TMP/repo" main:main
 out=$(in_repo deploy-page prod 380); rc=$?
@@ -556,6 +560,42 @@ if [ "$rc" -ne 0 ] && [ "$(writes)" -eq 0 ] && grep -q 'not a legal page' <<<"$o
   ok 'deploy-page with 362 -> refused, 0 writes'
 else
   bad "deploy-page with 362 -> refused, 0 writes (rc=$rc) $out"
+fi
+
+# (j) deploy-page dev, published block rewritten by Bitrix24 (lazy img) -> ok, live = draft and public files
+legal_repo
+: > "$TMP/stub/lazy-img"
+printf '%s' '<div id="b9301" class="block-wrapper"><img src="x.png"></div>' > "$TMP/repo/landing/site78/380/block-9301.draft.html"
+printf '%s' '<div id="b9301" class="block-wrapper"><img data-lazy-img="Y" data-src="x.png"></div>' > "$TMP/repo/landing/site78/380/block-9301.public.html"
+git_ add -A
+git_ commit -q -m lazy
+out=$(in_repo deploy-page dev 380); rc=$?
+if [ "$rc" -eq 0 ] \
+  && [ "$(jq -j '.[0].content' "$TMP/stub/blocks-390-1.json")" = "$(wrapped 9311 '<img src="x.png">')" ] \
+  && [ "$(jq -j '.[0].content' "$TMP/stub/blocks-390-0.json")" = "$(wrapped 9311 '<img data-lazy-img="Y" data-src="x.png">')" ]; then
+  ok 'deploy-page dev, published block rewritten by Bitrix24 (lazy img) -> ok, live = draft and public files'
+else
+  bad "deploy-page dev, published block rewritten by Bitrix24 (lazy img) -> ok, live = draft and public files (rc=$rc) $out"
+fi
+
+# (k) deploy-page prod, published block rewritten by Bitrix24 (lazy img) -> live = HEAD files, new tag
+legal_repo
+: > "$TMP/stub/lazy-img"
+printf '%s' '<div id="b9301" class="block-wrapper"><img src="x.png"></div>' > "$TMP/repo/landing/site78/380/block-9301.draft.html"
+printf '%s' '<div id="b9301" class="block-wrapper"><img data-lazy-img="Y" data-src="x.png"></div>' > "$TMP/repo/landing/site78/380/block-9301.public.html"
+git_ add -A
+git_ commit -q -m lazy
+git -C "$TMP/origin.git" fetch -q "$TMP/repo" main:main
+out=$(in_repo deploy-page prod 380); rc=$?
+tag=$(git -C "$TMP/origin.git" tag -l 'landing-prod-*' --sort=-refname | head -n 1)
+if [ "$rc" -eq 0 ] \
+  && [ "$(jq -j '.[0].content' "$TMP/stub/blocks-380-1.json")" = "$(wrapped 9301 '<img src="x.png">')" ] \
+  && [ "$(jq -j '.[0].content' "$TMP/stub/blocks-380-0.json")" = "$(wrapped 9301 '<img data-lazy-img="Y" data-src="x.png">')" ] \
+  && [ "$(git -C "$TMP/origin.git" tag -l 'landing-prod-*' | wc -l)" -eq 2 ] \
+  && [ "$(git -C "$TMP/origin.git" rev-parse "$tag^{commit}")" = "$(git_ rev-parse HEAD)" ]; then
+  ok 'deploy-page prod, published block rewritten by Bitrix24 (lazy img) -> live = HEAD files, new tag'
+else
+  bad "deploy-page prod, published block rewritten by Bitrix24 (lazy img) -> live = HEAD files, new tag (rc=$rc tag=$tag) $out"
 fi
 
 printf 'pass=%d fail=%d\n' "$PASS" "$FAIL"

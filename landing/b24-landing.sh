@@ -109,26 +109,33 @@ files_at() {  # <rev> <dir>: the main page at <rev> -> <dir>/content.html (block
   git cat-file blob "$rev:$SRC/cssblock.css" > "$dir/style.css" || return 1
 }
 
-page_files_at() {  # <rev> <lid> <dir>: draft blocks of legal page <lid> at <rev>, ascending id -> <dir>/<k>.html (block inside), <dir>/style.css
-  local rev=$1 lid=$2 dir=$3 blocks f k=0
+page_files_at() {  # <rev> <lid> <dir>: draft blocks of legal page <lid> at <rev>, ascending id -> <dir>/<k>.html (block inside), public blocks -> <dir>/pub/<k>.html, <dir>/style.css
+  local rev=$1 lid=$2 dir=$3 blocks pub f k=0
   blocks=$(git ls-tree --name-only "$rev" "landing/site78/$lid/" | grep -E '/block-[0-9]+\.draft\.html$' | sort -t- -k2,2n) || fail "$rev: no draft block in landing/site78/$lid"
-  mkdir -p "$dir"
+  pub=$(git ls-tree --name-only "$rev" "landing/site78/$lid/" | grep -E '/block-[0-9]+\.public\.html$' | sort -t- -k2,2n) || fail "$rev: no public block in landing/site78/$lid"
+  mkdir -p "$dir/pub"
   while IFS= read -r f; do
     k=$((k + 1))
     git cat-file blob "$rev:$f" | jq -n -j --rawfile s /dev/stdin '$s | '"$UNWRAP" > "$dir/$k.html" || return 1
   done <<<"$blocks"
+  k=0
+  while IFS= read -r f; do
+    k=$((k + 1))
+    git cat-file blob "$rev:$f" | jq -n -j --rawfile s /dev/stdin '$s | '"$UNWRAP" > "$dir/pub/$k.html" || return 1
+  done <<<"$pub"
   git cat-file blob "$rev:landing/site78/$lid/cssblock.css" > "$dir/style.css" || return 1
 }
 
-live_page_is() {  # <lid> <dir>: live draft and published blocks (in order) and CSS equal the files of <dir>
-  local lid=$1 dir=$2 mode k n
+live_page_is() {  # <lid> <dir>: live draft blocks equal <dir>/<k>.html, live published blocks equal <dir>/pub/<k>.html, CSS equal <dir>/style.css
+  local lid=$1 dir=$2 mode k n sub
   for mode in 1 0; do
+    if [ "$mode" = 1 ]; then sub=$dir; else sub=$dir/pub; fi
     b24 landing.block.getlist "lid=$lid" "params[edit_mode]=$mode" 'params[get_content]=1' > "$WORK/blocks.json" || return 1
     n=$(jq length "$WORK/blocks.json") || return 1
-    [ "$n" -eq "$(ls "$dir" | grep -c '\.html$')" ] || return 1
+    [ "$n" -eq "$(ls "$sub" | grep -c '\.html$')" ] || return 1
     for k in $(seq 1 "$n"); do
       jq -j ".[$((k - 1))].content | $UNWRAP" "$WORK/blocks.json" > "$WORK/live.$k" || return 1
-      cmp -s "$WORK/live.$k" "$dir/$k.html" || return 1
+      cmp -s "$WORK/live.$k" "$sub/$k.html" || return 1
     done
   done
   b24 landing.landing.getadditionalfields "lid=$lid" | jq -j '.CSSBLOCK_CODE // ""' > "$WORK/live.css" || return 1
@@ -260,7 +267,7 @@ deploy_page() {  # dev|prod <lid>: legal page <lid> of site 78, files at HEAD ->
     robots=$(b24 landing.landing.getadditionalfields "lid=$target" | jq -r '.METAROBOTS_INDEX // "?"') || fail "refused: cannot read dev page $target additional fields; nothing written"
     [ "$robots" = N ] || fail "refused: dev page $target METAROBOTS_INDEX=$robots, must be N (closed from search); nothing written"
     page_files_at HEAD "$lid" "$WORK/new" || exit 1
-    for f in "$WORK/new"/*.html; do
+    for f in "$WORK/new"/*.html "$WORK/new/pub"/*.html; do
       jq -n -j --rawfile s "$f" '$s | split("forms.arwox.ru") | join("forms-test.arwox.ru")' > "$WORK/dev.html" && mv "$WORK/dev.html" "$f" || exit 1
     done
     ready "$WORK/new" "$TEST_FORMS" zero-ok || exit 1
