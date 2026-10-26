@@ -25,6 +25,7 @@ A clear stopping condition. Tell the agent what 'done' looks like. Without a sto
 - **Стек:** React + TypeScript + Vite (pnpm); Python-обработчик форм; bash + pm2 для резерва.
 - **Точки входа:** `src/main.tsx`; `site78-releases/2026-07-29/backend-arwox-lead-form/index.py`; `forms-failover/`.
 - **Запрещённые зоны:** боевой DNS `forms.arwox.ru` — только через `forms-failover/dns-switch.sh` и по слову владельца; `secrets/` не читать; `/root/workspaces/tools/ecosystem.config.js` — только исполнитель по ТЗ.
+- **Документы вендоров — не править (слово владельца 26.10):** `landing/site78/384` (лицензионный договор на программы 1С-Битрикс), `landing/site78/390` (оферта на Сертификат 1С Битрикс24.Маркет Плюс), `landing/site78/378` (партнёрский договор Wazzup). Это условия правообладателей: отказа и возврата денег за лицензии у вендора нет. Юридические правки сайта — только контур персональных данных (152-ФЗ), если владелец не сказал иное.
 
 ## prod в этом проекте
 Runtime проекта: `index.py`, `consent.py`, `forms-failover/*`. Их правка — угрозы (prod §3) и откат (prod §5) в ТЗ до правки.
