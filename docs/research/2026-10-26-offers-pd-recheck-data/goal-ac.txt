@@ -1,0 +1,7 @@
+AC1: grep -c -e lid.384 -e lid.390 -e lid.392 -e lid.394 -e lid.396 /root/workspaces/projects/arwox-v3-src/docs/research/2026-10-26-offers-pd-recheck.md => >=5
+AC2: grep -c -e consultant.ru -e pravo.gov.ru /root/workspaces/projects/arwox-v3-src/docs/research/2026-10-26-offers-pd-recheck.md => >=5
+AC3: grep -l -e НЕ.ИСПРАВЛЕНО -e НЕ.ПРОВЕРЕНО /root/workspaces/projects/arwox-v3-src/docs/research/2026-10-26-offers-pd-recheck.md => <empty>
+AC4: git log --no-walk --tags=landing-prod-* --since=2026-10-26T14:45+03:00 --format=%D => tag: landing-prod-
+AC5: git diff --name-only c34c484 origin/main -- src forms-failover site78-releases landing/b24-landing.sh landing/site78/362 landing/site78/380 landing/site78/388 landing/site80 => <empty>
+AC6: gh pr view 75 --json state => MERGED
+AC7: gh pr view 77 --json state => MERGED
