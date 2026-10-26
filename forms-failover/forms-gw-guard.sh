@@ -9,7 +9,8 @@ export PATH="$PATH:/root/yandex-cloud/bin"
 GUARD_GW_ID="${GUARD_GW_ID:-d5dn462s09a9dpofvl2d}"
 GUARD_FORMS_URL="${GUARD_FORMS_URL:-https://forms.arwox.ru/}"
 GUARD_FQDN="${GUARD_FORMS_URL#*://}"; GUARD_FQDN="${GUARD_FQDN%%/*}"
-GUARD_GW_HOST="${GUARD_GW_HOST:-}"
+GUARD_GW_HOST="${GUARD_GW_HOST:-}"; DNS_SWITCH="${DNS_SWITCH:-}"; NPM_HOST_ID="${NPM_HOST_ID:-}"; BEGET_IP="${BEGET_IP:-45.139.76.176}"
+NPM_SSL_REQUEST="${NPM_SSL_REQUEST:-/root/workspaces/tools/acc1-scripts/actions/npm_ssl_request.sh}"
 GUARD_BALANCE_MIN="${GUARD_BALANCE_MIN:-10}"
 GUARD_STATE_DIR="${GUARD_STATE_DIR:-/root/workspaces/tools/scripts/schedulers/state}"
 GUARD_DEBOUNCE_SEC="${GUARD_DEBOUNCE_SEC:-21600}"
@@ -51,6 +52,19 @@ notify() { # type text
   local type="$1" text="$2" now ts state json out msg started last elapsed
   text=$(printf '%s' "$text" | tr -d '"\r\n' | head -c 600)
   now=$(date +%s)
+  if [ -n "$DNS_SWITCH" ] && { [ "$type" = form_error ] || [ "$type" = form_recovered ]; }; then
+    log "notify $type suppressed (DNS_SWITCH)"
+    if [ "$type" = form_recovered ] && [ -f "$STATE_FILE" ]; then
+      json=$(jq 'del(.form_outage_started_at, .form_outage_notified_at)' "$STATE_FILE") &&
+        printf '%s\n' "$json" | state_write
+    fi
+    if [ "$type" = form_error ]; then # DNS_SWITCH silences the message only; the outage start is still recorded
+      [ -f "$STATE_FILE" ] || printf '{}\n' > "$STATE_FILE"
+      jq --argjson n "$now" 'if (.form_outage_started_at // 0) == 0 then .form_outage_started_at = $n else . end' \
+        "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE" || log "outage start write failed"
+    fi
+    return 0
+  fi
   case "$type" in
     gw_resumed) msg="✅ $GUARD_FQDN: шлюз форм был остановлен (реапер YC) — поднят сторожем, форма отвечает <$text>." ;;
     low_balance) msg="💸 Баланс Yandex Cloud $text ₽ (< $GUARD_BALANCE_MIN). Пополнить, иначе реапер остановит шлюз форм." ;;
@@ -263,8 +277,8 @@ incident_snapshot() {
 }
 
 fallback_track() { # failed|success; switch only after two consecutive outcomes
-  local outcome="$1" state failures successes mode target result rc snapshot
-  [ -n "${FALLBACK_PAGE_ID:-}" ] && [ -n "${FALLBACK_BLOCK_ID:-}" ] || return 0
+  local outcome="$1" state failures successes mode target result rc dns_result dns_rc snapshot
+  [ -n "${FALLBACK_PAGE_ID:-}" ] && [ -n "${FALLBACK_BLOCK_ID:-}" ] || [ -n "$DNS_SWITCH" ] || return 0
   state="{}"
   if [ -f "$STATE_FILE" ] && state=$(cat "$STATE_FILE" 2>/dev/null) && echo "$state" | jq -e . >/dev/null 2>&1; then :; else state="{}"; fi
   failures=$(echo "$state" | jq -r '.fallback_failures // 0')
@@ -292,9 +306,22 @@ fallback_track() { # failed|success; switch only after two consecutive outcomes
   if [ -n "${FALLBACK_PAGE_ID:-}" ] && [ -n "${FALLBACK_BLOCK_ID:-}" ]; then
     result=$(bash "$FALLBACK_SWITCH" apply "$target" 2>&1); rc=$?
   fi
+  if [ -n "$DNS_SWITCH" ]; then
+    dns_result=$(bash "$DNS_SWITCH" apply "$target" --fqdn "$GUARD_FQDN" 2>&1); dns_rc=$?
+    if [ "$dns_rc" != 0 ]; then
+      if [ "$target" = outage ] && ! jq -e '.dns_fail_snapshot == true' "$STATE_FILE" >/dev/null; then
+        snapshot=$(incident_snapshot)
+        jq '.dns_fail_snapshot=true' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+        log "dns switch failed: ${dns_result%%$'\n'*}; snapshot: $snapshot"
+      else
+        log "dns switch failed: ${dns_result%%$'\n'*}"
+      fi
+      [ "$rc" = 0 ] && return 0
+    fi
+  fi
   result=${result%%$'\n'*}
   if [ "$rc" = 0 ]; then
-    jq --arg mode "$target" '.fallback_mode=$mode' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+    jq --arg mode "$target" '.fallback_mode=$mode | del(.dns_fail_snapshot)' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
     case "$target" in
       outage)
         snapshot=$(incident_snapshot)
@@ -491,6 +518,19 @@ fi
 
 check_captcha_unverified
 check_reserve_leads
+
+state=$(jq -c . "$STATE_FILE" 2>/dev/null || printf '%s' '{}')
+if [ "$(jq -r '.fallback_mode // "normal"' <<<"$state")" = outage ] && [ -n "$NPM_HOST_ID" ]; then
+  all=1; for ns in ns1.beget.pro ns2.beget.pro ns1.beget.ru ns2.beget.ru ns1.beget.com ns2.beget.com; do [ "$(dig +norecurse +short "$GUARD_FQDN" "@$ns")" = "$BEGET_IP" ] || all=0; done
+  if [ "$all" = 1 ] && ! curl -s -o /dev/null --max-time 10 --resolve "$GUARD_FQDN:443:127.0.0.1" "https://$GUARD_FQDN/"; then
+    le_at=$(jq -r '.le_at // 0' <<<"$state"); now=$(date +%s)
+    if [ $((now - le_at)) -ge 900 ]; then
+      "$NPM_SSL_REQUEST" "{\"proxy_host_id\":\"$NPM_HOST_ID\"}" >/dev/null; rc=$?
+      log "ssl request rc=$rc"
+      jq --argjson le_at "$now" '.le_at=$le_at' "$STATE_FILE" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+    fi
+  fi
+fi
 
 IAM=$(timeout "$GUARD_YC_TIMEOUT" yc iam create-token 2>/dev/null)
 if [ -z "$IAM" ]; then
