@@ -1,0 +1,9 @@
+sdk-agent: subtype=success cost_usd=0.002468655 cache_read=42688 cache_write=13539
+ docs/validator/claude-web-offers-validator.md | 14 +++++++-------
+ landing/site78/396/block-9304.draft.html      |  2 +-
+ landing/site78/396/block-9306.public.html     |  2 +-
+ 3 files changed, 9 insertions(+), 9 deletions(-)
+ M docs/validator/claude-web-offers-validator.md
+ M landing/site78/396/block-9304.draft.html
+ M landing/site78/396/block-9306.public.html
+code-channel: mode=code form=sdk rc=0

@@ -1,0 +1,11 @@
+FACT | Q1 | yes | «1.1. «Конфиденциальная информация» – любая информация в любой форме и на любых носителях, полученная Исполнителем от Заказчика … включая, но не ограничиваясь: а) Персональные данные в любом виде»
+
+FACT | Q2 | partial: п. 3.3 is the only clause that lets subcontractors work with Конфиденциальная информация (which includes personal data). Its conditions are a confidentiality agreement with each Субподрядчик and obligations "не менее строгие". No list of personal data, no list of actions, no purposes, no ст. 19 safeguards, and no subcontractor-specific security duties (3.8 is addressed to Исполнитель). | «с каждым Субподрядчиком им заключено соглашение о конфиденциальности»
+
+FACT | Q3 | no | -
+
+VERDICT | C6 | BREACH | Q1 = yes, and Q2 shows that for personal data passed to Субподрядчики the ч. 3 ст. 6 items are missing: перечень ПД, перечень действий, цели, ст. 19 requirements. Caveat: the Policy never calls the subcontracting a «поручение оператора» (Q3 = no), so applying ч. 3 ст. 6 rests on the arrangement being a поручение, which is inferred, not stated. | Для Субподрядчиков, получающих персональные данные, определяются перечень персональных данных, перечень действий (операций), цели их обработки, обязанность соблюдать конфиденциальность персональных данных и требования, предусмотренные статьей 19 Федерального закона «О персональных данных».
+
+SUMMARY | T1 | done
+sdk-agent: subtype=success cost_usd=0.00371969 cache_read=36779 cache_write=11640
+code-channel: mode=audit form=sdk rc=0

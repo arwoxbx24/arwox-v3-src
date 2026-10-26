@@ -1,0 +1,5 @@
+sdk-agent: subtype=success cost_usd=0.0046926450000000005 cache_read=71967 cache_write=18051
+ docs/validator/claude-web-offers-validator.md | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+ M docs/validator/claude-web-offers-validator.md
+code-channel: mode=code form=sdk rc=0
