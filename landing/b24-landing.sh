@@ -2,9 +2,9 @@
 # Landing pages of a Bitrix24 site <-> files in git. Reads and writes REST via the installed `b24` CLI.
 #   snapshot <site> <dir>  save every page of the site into <dir>/<lid>/ (replaces <dir>)
 #   verify   <site> <dir>  re-read the site and compare with <dir> byte by byte
-#   deploy dev             main page files at HEAD -> dev page 368 (METAROBOTS_INDEX=N), forms -> forms-test
-#   deploy prod            main page files at origin/main -> prod page 362, then a new landing-prod-* tag
-#   rollback <tag>         main page files of a landing-prod-* tag -> prod page 362, then a new tag
+#   deploy dev             main page files at HEAD -> dev page 368 (METAROBOTS_INDEX=N), forms -> forms-test, site 80 settings from landing/site-settings.json at HEAD
+#   deploy prod            main page files at origin/main -> prod page 362, then a new landing-prod-* tag; site 78 settings from landing/site-settings.json at origin/main, before the page
+#   rollback <tag>         main page files of a landing-prod-* tag -> prod page 362, then a new tag; site 78 settings from the tag's landing/site-settings.json if it has one
 #   copy-dev <lid>         legal page <lid> of site 78 -> its copy on site 80 (METAROBOTS_INDEX=N), "<lid> <copy>" in landing/dev-lids.txt
 #   deploy-page dev <lid>  legal page files at HEAD -> its dev copy (landing/dev-lids.txt), forms -> forms-test
 #   deploy-page prod <lid>... legal page files at origin/main -> pages <lid> on site 78, then one new landing-prod-* tag
@@ -212,8 +212,24 @@ tag_prod() {  # <rev> <lid>: a new landing-prod-* tag on <rev> in origin, after 
   printf 'prod: page %s = %s, tag %s\n' "$lid" "$rev" "$new"
 }
 
-to_prod() {  # <rev>: prod page 362 <- the main page at <rev>, then a new landing-prod-* tag on <rev> in origin
-  local rev=$1 tags last
+apply_site_settings() {  # <site-id> <rev>: landing/site-settings.json at <rev> -> site settings (one landing.site.update), re-read: live = file
+  local site=$1 rev=$2 k v got live
+  local -a args
+  git show "$rev:landing/site-settings.json" > "$WORK/site-settings.json" 2>/dev/null || fail "refused: $rev has no landing/site-settings.json; nothing written"
+  jq -e 'type == "object" and length > 0 and all(.[]; type == "string")' "$WORK/site-settings.json" > /dev/null || fail "refused: $rev landing/site-settings.json is not a JSON object of strings; nothing written"
+  mapfile -t args < <(jq -r 'to_entries[] | "fields[ADDITIONAL_FIELDS][\(.key)]=\(.value)"' "$WORK/site-settings.json")
+  b24 landing.site.update "id=$site" "${args[@]}" > /dev/null || fail "site $site: settings write failed; page not published"
+  live=$(b24 landing.site.getadditionalfields "id=$site") || fail "site $site: cannot read settings back; page not published"
+  for k in $(jq -r 'keys[]' "$WORK/site-settings.json"); do
+    v=$(jq -r --arg k "$k" '.[$k]' "$WORK/site-settings.json") || exit 1
+    got=$(printf '%s\n' "$live" | jq -r --arg k "$k" '.[$k] // ""') || exit 1
+    [ "$got" = "$v" ] || fail "refused: site $site field $k is $got, want $v"
+  done
+  printf 'site %s: settings %s keys = %s\n' "$site" "$(jq length "$WORK/site-settings.json")" "$(git rev-parse --short "$rev^{commit}")"
+}
+
+to_prod() {  # <rev> [tag]: prod page 362 <- the main page at <rev>, then a new landing-prod-* tag on <rev> in origin; tag: no site-settings.json in <rev> = settings unchanged
+  local rev=$1 skip=${2:-} tags last
   tags=$(git tag -l 'landing-prod-*' --sort=-refname)
   last=${tags%%$'\n'*}
   [ -n "$last" ] || fail 'refused: no landing-prod-* tag (landing/README.md: base tag); nothing written'
@@ -222,6 +238,11 @@ to_prod() {  # <rev>: prod page 362 <- the main page at <rev>, then a new landin
   # A part equal to <rev> is left by an earlier failed run of this command; both versions are in git.
   live_matches "$PROD_LID" "$WORK/old" "$WORK/new" || fail "refused: live page $PROD_LID differs from $last and from $rev; nothing written"
   ready "$WORK/new" "$PROD_FORMS" || exit 1
+  if [ "$skip" = tag ] && ! git cat-file -e "$rev:landing/site-settings.json" 2>/dev/null; then
+    printf 'site 78: tag has no site-settings.json, settings unchanged\n'
+  else
+    apply_site_settings 78 "$rev"
+  fi
   if ! upload "$PROD_LID" "$WORK/new"; then
     upload "$PROD_LID" "$WORK/old" || fail "write failed, restore failed: page $PROD_LID is part $rev, part $last; when Bitrix24 answers, run the same command again"
     fail "write failed, restored: page $PROD_LID = $last"
@@ -240,6 +261,7 @@ deploy_dev() {
   jq -n -j --rawfile s "$WORK/new/content.html" '$s | split("forms.arwox.ru") | join("forms-test.arwox.ru")' > "$WORK/dev.html" || exit 1
   mv "$WORK/dev.html" "$WORK/new/content.html" || exit 1
   ready "$WORK/new" "$TEST_FORMS" || exit 1
+  apply_site_settings "$DEV_SITE" HEAD
   upload "$DEV_LID" "$WORK/new" || fail "dev page $DEV_LID: write failed; snapshot $DEV_SITE $DEV_DIR, commit, then deploy dev again"
   printf 'dev: page %s = %s; next: snapshot %s %s and commit\n' "$DEV_LID" "$(git rev-parse --short HEAD)" "$DEV_SITE" "$DEV_DIR"
 }
@@ -325,7 +347,7 @@ rollback() {  # <tag>: prod page 362 <- the main page of a landing-prod-* tag
   [[ $tag =~ ^landing-prod-[0-9]{8}-[0-9]{6}-[0-9a-f]+$ ]] || fail "refused: $tag is not a landing-prod-* tag"
   git fetch -q --tags origin || fail 'git fetch origin failed; nothing written'
   git show-ref --verify -q "refs/tags/$tag" || fail "refused: no tag $tag"
-  to_prod "$tag"
+  to_prod "$tag" tag
 }
 
 check() {  # <url>: 15 sections in order, 3/3 forms on the address of its environment, CSS within the field, robots
