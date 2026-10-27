@@ -13,6 +13,8 @@
 - `additional-fields.json` — `landing.landing.getadditionalfields` целиком;
 - `cssblock.css` — поле `CSSBLOCK_CODE` из него (CSS страницы), для правок и диффа.
 
+`landing/site-settings.json` — настройки сайта Битрикс24 (баннер cookies, счётчик Метрики); deploy dev/prod и rollback записывают их в целевой сайт через `landing.site.update` и перечитывают.
+
 ## Команды
 
 ```bash
